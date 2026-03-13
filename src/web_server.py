@@ -309,11 +309,21 @@ def telegram_webhook(token: str):
         from telegram import Update
         import json
         
-        update_data = request.get_json()
-        update = Update.de_json(update_data, telegram_app.bot)
+        update_data = request.get_data()
+        update = Update.de_json(json.loads(update_data), telegram_app.bot)
         
-        # Usar run_async para procesar la actualización
-        asyncio.run(telegram_app.process_update(update))
+        # Procesar en un hilo separado
+        def process_update():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(telegram_app.process_update(update))
+            finally:
+                loop.close()
+        
+        thread = threading.Thread(target=process_update)
+        thread.start()
+        
         return jsonify({"ok": True})
     except Exception as e:
         logger.error(f"Webhook error: {e}")
