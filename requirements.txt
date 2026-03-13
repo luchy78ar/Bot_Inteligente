@@ -1,6 +1,6 @@
 ccxt>=4.0.0
 pandas>=2.0.0
-pandas_ta>=0.3.14b
+pandas_ta>=0.3.14b0
 python-telegram-bot>=20.0
 flask>=3.0.0
 python-dotenv>=1.0.0
