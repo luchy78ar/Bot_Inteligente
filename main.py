@@ -181,11 +181,16 @@ class BotTrading:
         """Retorna el estado actual del bot con caché ultrarrápida."""
         try:
             ahora = datetime.now().timestamp()
-            # Caché reducida a 1s para máxima fluidez
+            # Sin caché para el balance (siempre fresco)
+            balance = self.exchange.obtener_balance()
+            
+            # Solo caché para otros datos (1 segundo)
             if hasattr(self, '_estado_cache') and (ahora - getattr(self, '_ultimo_fetch_estado', 0) < 1.0):
+                # Actualizar solo el balance
+                self._estado_cache['balance_total'] = balance.get("total", 0)
+                self._estado_cache['balance_disponible'] = balance.get("free", 0)
                 return self._estado_cache
 
-            balance = self.exchange.obtener_balance()
             posiciones_db = await self.persistencia.obtener_posiciones_abiertas()
             pos_exchange = self.exchange.obtener_posicion(self.simbolo_actual)
             
