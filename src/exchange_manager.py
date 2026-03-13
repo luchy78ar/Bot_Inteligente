@@ -1,0 +1,516 @@
+"""
+Gestor de Exchanges - Factory Pattern
+=======================================
+Manejo de conexiones a múltiples exchanges usando ccxt.
+"""
+import ccxt
+import logging
+import time
+from typing import Optional, Dict, Any, List
+from datetime import datetime
+import ccxt
+import pandas as pd
+import pandas_ta as ta
+import numpy as np
+
+logger = logging.getLogger(__name__)
+
+
+class ExchangeFactory:
+    """
+    Factory para crear instancias de exchanges.
+    """
+    
+    _instances: Dict[str, 'ExchangeWrapper'] = {}
+    
+    @staticmethod
+    def create(exchange_id: str, api_key: str = "", api_secret: str = "", 
+               testnet: bool = False) -> 'ExchangeWrapper':
+        """
+        Crea una instancia de ExchangeWrapper.
+        """
+        cache_key = f"{exchange_id}_{testnet}"
+        
+        if cache_key in ExchangeFactory._instances:
+            logger.info(f"♻️ Reutilizando instancia existente de {exchange_id}")
+            return ExchangeFactory._instances[cache_key]
+        
+        logger.info(f"🔧 Creando nueva instancia de {exchange_id}")
+        instance = ExchangeWrapper(exchange_id, api_key, api_secret, testnet)
+        ExchangeFactory._instances[cache_key] = instance
+        return instance
+    
+    @staticmethod
+    def clear_instances() -> None:
+        """Limpia todas las instancias cacheadas."""
+        ExchangeFactory._instances.clear()
+        logger.info("🗑️ Instancias de exchange cacheadas eliminadas")
+
+
+class ExchangeWrapper:
+    """
+    Wrapper para operaciones con exchanges (ccxt 4.x - sync).
+    """
+    
+    def __init__(self, exchange_id: str, api_key: str, api_secret: str, testnet: bool = False):
+        self.exchange_id = exchange_id.lower()
+        self.api_key = api_key
+        self.api_secret = api_secret
+        self.testnet = testnet
+        self._exchange: Optional[ccxt.Exchange] = None
+        self.last_error: Optional[str] = None
+        self._balance_cache: Dict[str, float] = {}
+        self._last_balance_fetch_time: float = 0
+        self._initialize_exchange()
+    
+    def _initialize_exchange(self) -> None:
+        """Inicializa la instancia de ccxt."""
+        try:
+            import config as cfg
+            
+            exchange_class = getattr(ccxt, self.exchange_id)
+            
+            config = {
+                'enableRateLimit': True,
+                'options': {'defaultType': 'future'}
+            }
+            
+            if self.testnet:
+                config['testnet'] = True
+            
+            config['apiKey'] = self.api_key
+            config['secret'] = self.api_secret
+            
+            if self.api_key and self.api_secret:
+                logger.info(f"🔑 API Key configurada: {self.api_key[:10]}...")
+            else:
+                logger.warning("⚠️ API Key o Secret vacíos!")
+            
+            # Silenciar advertencia de fetchOpenOrders sin símbolo
+            config['options'] = config.get('options', {})
+            config['options']['warnOnFetchOpenOrdersWithoutSymbol'] = False
+            
+            self._exchange = exchange_class(config)
+            self._exchange.load_markets()
+            logger.info(f"✅ Exchange inicializado y mercados cargados: {self.exchange_id}")
+            
+        except AttributeError:
+            logger.error(f"❌ Exchange no soportado: {self.exchange_id}")
+            raise ValueError(f"Exchange no soportado: {self.exchange_id}")
+        except Exception as e:
+            logger.error(f"❌ Error inicializando exchange: {e}")
+            raise
+
+    def cantidad_a_precision(self, symbol: str, cantidad: float) -> float:
+        """Ajusta la cantidad a la precisión permitida por el exchange."""
+        try:
+            if not self._exchange.markets:
+                self._exchange.load_markets()
+            
+            return float(self._exchange.amount_to_precision(symbol, cantidad))
+        except Exception as e:
+            logger.error(f"❌ Error ajustando precisión de cantidad: {e}")
+            return cantidad
+    
+    def verificar_conexion(self) -> bool:
+        """Verifica la conexión con el exchange."""
+        try:
+            self._exchange.fetch_time()
+            logger.info(f"✅ Conexión verificada: {self.exchange_id}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error verificando conexión: {e}")
+            return False
+    
+    def obtener_balance(self) -> Dict[str, float]:
+        """Obtiene el balance de la cuenta con caché de 2 segundos."""
+        try:
+            ahora = time.time()
+            if ahora - self._last_balance_fetch_time < 2.0 and self._balance_cache:
+                return self._balance_cache
+
+            logger.info(f"🔍 Obtener balance - API Key: {self.api_key[:10] if self.api_key else 'EMPTY'}..., testnet: {self.testnet}")
+            balance = self._exchange.fetch_balance()
+            usdt_balance = balance.get('USDT', {})
+            
+            self._balance_cache = {
+                'total': usdt_balance.get('total', 0),
+                'free': usdt_balance.get('free', 0),
+                'used': usdt_balance.get('used', 0)
+            }
+            self._last_balance_fetch_time = ahora
+            return self._balance_cache
+        except Exception as e:
+            logger.error(f"❌ Error obteniendo balance: {e}")
+            return {'total': 0, 'free': 0, 'used': 0}
+    
+    def obtener_balance_total_usdt(self) -> float:
+        """Obtiene el balance total en USDT."""
+        balance = self.obtener_balance()
+        return balance.get('total', 0)
+    
+    def obtener_balance_disponible_usdt(self) -> float:
+        """Obtiene el balance disponible (free) en USDT."""
+        balance = self.obtener_balance()
+        return balance.get('free', 0)
+    
+    def calcular_posicion_maxima(self, symbol: str, leverage: int, precio: float) -> float:
+        """Calcula la cantidad máxima de la posición basada en el balance disponible y apalancamiento."""
+        try:
+            balance = self.obtener_balance_disponible_usdt()
+            if balance <= 0:
+                logger.warning("⚠️ Balance disponible es 0, no se puede abrir posición")
+                return 0
+            
+            max_notional = balance * leverage
+            
+            mercado = self._exchange.markets.get(symbol, {})
+            if mercado:
+                limits = mercado.get('limits', {})
+                amount_limits = limits.get('amount', {})
+                max_amount = amount_limits.get('max', None)
+                
+                if max_amount:
+                    max_notional = min(max_notional, max_amount * precio)
+            
+            cantidad_maxima = max_notional / precio
+            cantidad_precision = self.cantidad_a_precision(symbol, cantidad_maxima)
+            
+            logger.info(f"📊 Posición máxima: {cantidad_precision} {symbol} (balance: {balance}, leverage: {leverage}x)")
+            return cantidad_precision
+        except Exception as e:
+            logger.error(f"❌ Error calculando posición máxima: {e}")
+            return 0
+    
+    def obtener_precio_actual(self, symbol: str) -> float:
+        """Obtiene el precio actual (Last Price) de forma ultra-rápida."""
+        try:
+            ticker = self._exchange.fetch_ticker(symbol)
+            return float(ticker.get('last', 0))
+        except Exception as e:
+            logger.error(f"❌ Error obteniendo precio: {e}")
+            return 0.0
+    
+    def obtener_precio_mark(self, symbol: str) -> float:
+        """Obtiene el precio mark (para liquidaciones)."""
+        try:
+            ticker = self._exchange.fetch_ticker(symbol)
+            return ticker.get('markPrice', ticker.get('last', 0))
+        except Exception as e:
+            logger.error(f"❌ Error obteniendo precio mark: {e}")
+            return 0
+    
+    def obtener_precios(self, symbol: str) -> Dict[str, float]:
+        """Obtiene varios precios de un símbolo."""
+        try:
+            ticker = self._exchange.fetch_ticker(symbol)
+            return {
+                'last': ticker.get('last', 0),
+                'mark': ticker.get('markPrice', 0),
+                'index': ticker.get('indexPrice', 0),
+                'bid': ticker.get('bid', 0),
+                'ask': ticker.get('ask', 0)
+            }
+        except Exception as e:
+            logger.error(f"❌ Error obteniendo precios: {e}")
+            return {'last': 0, 'mark': 0, 'index': 0, 'bid': 0, 'ask': 0}
+    
+    def obtener_ohlcv(self, symbol: str, timeframe: str = '15m', 
+                      limite: int = 100) -> pd.DataFrame:
+        """Obtiene datos OHLCV en formato DataFrame."""
+        try:
+            ohlcv = self._exchange.fetch_ohlcv(symbol, timeframe, limit=limite)
+            
+            df = pd.DataFrame(ohlcv, columns=[
+                'timestamp', 'open', 'high', 'low', 'close', 'volume'
+            ])
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df.set_index('timestamp', inplace=True)
+            
+            return df
+        except Exception as e:
+            logger.error(f"❌ Error obteniendo OHLCV: {e}")
+            return pd.DataFrame()
+    
+    def configurar_apalancamiento(self, symbol: str, leverage: int) -> bool:
+        """Configura el apalancamiento y el modo de margen (Fuerza tipo int)."""
+        try:
+            # Forzar conversión a entero para evitar error -1102 de Binance
+            leverage_int = int(float(leverage))
+            
+            # Forzar modo de margen cruzado (CROSS) para usar todo el balance
+            try:
+                self._exchange.set_margin_mode('CROSS', symbol)
+                logger.info(f"✅ Modo de margen CROSS configurado en {symbol}")
+            except Exception as e:
+                logger.debug(f"ℹ️ Info modo margen (puede que ya esté en CROSS): {e}")
+
+            self._exchange.set_leverage(leverage_int, symbol)
+            logger.info(f"✅ Apalancamiento configurado: {leverage_int}x en {symbol}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error configurando apalancamiento/margen: {e}")
+            return False
+
+    def obtener_posicion(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Obtiene información de la posición actual de forma ultra-robusta."""
+        try:
+            # 1. Intentar obtener posiciones
+            positions = self._exchange.fetch_positions()
+            
+            for pos in positions:
+                # CCXT 4.x usa 'contracts' para el tamaño, pero 'size' o 'positionAmt' pueden estar en 'info'
+                contracts = float(pos.get('contracts') or pos.get('size') or pos.get('info', {}).get('positionAmt', 0))
+                
+                # FILTRO ANTI-DUST: Ignorar posiciones infinitesimales
+                if abs(contracts) > 0.00001:
+                    pos_symbol = pos.get('symbol')
+                    # Normalizar símbolos para comparación (quitar /, :, USDT, etc)
+                    norm_pos = pos_symbol.replace('/', '').replace(':', '').replace('USDT', '').split('_')[0].upper()
+                    norm_target = symbol.replace('/', '').replace(':', '').replace('USDT', '').split('_')[0].upper()
+                    
+                    if pos_symbol == symbol or norm_pos == norm_target:
+                        # Extraer datos con nombres de campos de CCXT 4.x
+                        liq_price = float(pos.get('liquidationPrice') or pos.get('liqPrice') or pos.get('info', {}).get('liquidationPrice') or 0)
+                        
+                        # Fallback de liquidación para Binance (v3 API)
+                        if liq_price == 0 and self.exchange_id == 'binance':
+                            try:
+                                clean_symbol = pos_symbol.replace('/', '').split(':')[0]
+                                risk_info = self._exchange.fapiPrivateGetPositionRisk({'symbol': clean_symbol})
+                                if risk_info:
+                                    # Buscar el símbolo exacto en la lista de riesgos
+                                    for r in risk_info:
+                                        if r.get('symbol') == clean_symbol:
+                                            liq_price = float(r.get('liquidationPrice', 0))
+                                            break
+                            except Exception as e:
+                                logger.debug(f"ℹ️ Fallback liq falló: {e}")
+
+                        return {
+                            'size': contracts,
+                            'side': 'long' if contracts > 0 else 'short',
+                            'entry_price': float(pos.get('entryPrice') or pos.get('entry_price') or pos.get('info', {}).get('entryPrice', 0)),
+                            'unrealized_pnl': float(pos.get('unrealizedPnl') or pos.get('unrealized_pnl') or pos.get('info', {}).get('unrealizedProfit', 0)),
+                            'leverage': int(pos.get('leverage') or pos.get('info', {}).get('leverage', 1)),
+                            'liquidation_price': liq_price,
+                            'margin': float(pos.get('initialMargin') or pos.get('info', {}).get('initialMargin', 0))
+                        }
+            return None
+        except Exception as e:
+            logger.error(f"❌ Error obteniendo posición: {e}")
+            return None
+    
+    def crear_orden(self, symbol: str, lado: str, cantidad: float,
+                    precio: Optional[float] = None, 
+                    tipo_orden: str = 'market',
+                    reduce_only: bool = False) -> Optional[Dict[str, Any]]:
+        """Crea una orden de trading."""
+        try:
+            params = {'reduceOnly': reduce_only} if reduce_only else {}
+            
+            # Ajustar cantidad a precisión del exchange por seguridad
+            cantidad_final = self.cantidad_a_precision(symbol, cantidad)
+            
+            orden = self._exchange.create_order(
+                symbol=symbol,
+                type=tipo_orden,
+                side=lado,
+                amount=cantidad_final,
+                price=precio,
+                params=params
+            )
+            
+            logger.info(f"✅ Orden creada: {lado} {cantidad_final} {symbol} @ {precio or 'market'}")
+            return orden
+            
+        except Exception as e:
+            self.last_error = str(e)
+            logger.error(f"❌ Error creando orden: {e}")
+            return None
+    
+    def abrir_posicion(self, symbol: str, lado: str, cantidad: float,
+                       leverage: int = 20) -> Optional[Dict[str, Any]]:
+        """Abre una posición larga o corta."""
+        try:
+            self.configurar_apalancamiento(symbol, leverage)
+            
+            lado_orden = 'buy' if lado == 'long' else 'sell'
+            
+            orden = self.crear_orden(
+                symbol=symbol,
+                lado=lado_orden,
+                cantidad=cantidad,
+                tipo_orden='market'
+            )
+            
+            if orden:
+                logger.info(f"📈 Posición abierta: {lado.upper()} {cantidad} {symbol}")
+            
+            return orden
+            
+        except Exception as e:
+            logger.error(f"❌ Error abriendo posición: {e}")
+            return None
+    
+    def cerrar_posicion(self, symbol: str, cantidad: Optional[float] = None) -> bool:
+        """Cierra la posición actual de forma radical e infalible (Hedge Mode Aware)."""
+        try:
+            # 1. Limpieza total de órdenes para este símbolo específico (Binance Direct)
+            if self.exchange_id == 'binance':
+                try:
+                    symbol_binance = symbol.replace('/', '').replace(':USDT', '')
+                    logger.info(f"🧹 Binance: Cancelando TODAS las órdenes de {symbol_binance}...")
+                    self._exchange.fapiPrivateDeleteAllOpenOrders({'symbol': symbol_binance})
+                    import time
+                    time.sleep(1) # Pausa crítica para sincronización de Binance
+                except Exception as e:
+                    logger.debug(f"⚠️ Error en limpieza directa de Binance: {e}")
+
+            # 2. Obtener la posición exacta con datos crudos
+            positions = self._exchange.fetch_positions([symbol])
+            pos = None
+            for p in positions:
+                contracts = float(p.get('contracts') or p.get('size') or p.get('info', {}).get('positionAmt', 0))
+                if contracts != 0:
+                    pos = p
+                    break
+            
+            if not pos:
+                logger.warning(f"⚠️ No hay posición activa en {symbol} para cerrar.")
+                return True # Ya está cerrada
+            
+            # 3. Datos de la posición
+            raw_size = float(pos.get('info', {}).get('positionAmt', 0))
+            lado_posicion = pos.get('info', {}).get('positionSide', 'BOTH') # BOTH = One Way, LONG/SHORT = Hedge
+            cantidad_real = abs(raw_size)
+            cantidad_a_cerrar = cantidad_real if cantidad is None else min(cantidad, cantidad_real)
+            
+            # Ajustar a precisión (truncar hacia abajo)
+            import math
+            paso_cantidad = self._exchange.markets[symbol]['precision']['amount']
+            factor = 1 / paso_cantidad
+            cantidad_a_cerrar = math.floor(cantidad_a_cerrar * factor) / factor
+            
+            # Determinar lado de la orden
+            lado_orden = 'sell' if raw_size > 0 else 'buy'
+            
+            # 4. Parámetros de cierre (Compatibilidad Hedge Mode)
+            params = {'reduceOnly': True}
+            if lado_posicion != 'BOTH':
+                params['positionSide'] = lado_posicion
+                # En Hedge Mode, ReduceOnly no es compatible con positionSide en algunas versiones de API
+                # pero positionSide + orden contraria es suficiente para cerrar.
+                params.pop('reduceOnly')
+
+            logger.info(f"🔒 Cerrando {symbol}: {lado_orden.upper()} {cantidad_a_cerrar} (Modo: {lado_posicion})")
+            
+            orden = self._exchange.create_order(
+                symbol=symbol,
+                type='market',
+                side=lado_orden,
+                amount=cantidad_a_cerrar,
+                params=params
+            )
+            
+            if orden:
+                logger.info(f"✅ Posición de {symbol} CERRADA con éxito.")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ Error crítico cerrando {symbol}: {e}")
+            return False
+    
+    def cerrar_todas_posiciones(self) -> bool:
+        """Cierra todas las posiciones abiertas de forma radical (Pánico)."""
+        try:
+            # 1. Obtener posiciones actuales
+            positions = self._exchange.fetch_positions()
+            exito_total = True
+            
+            for pos in positions:
+                contracts = float(pos.get('contracts') or pos.get('size') or pos.get('info', {}).get('positionAmt', 0))
+                if abs(contracts) > 0.00001:
+                    symbol = pos.get('symbol')
+                    logger.info(f"🚨 PÁNICO: Detectada posición en {symbol} ({contracts}). Cerrando de forma radical...")
+                    
+                    # REUTILIZAR la lógica infalible de cerrar_posicion
+                    if not self.cerrar_posicion(symbol):
+                        exito_total = False
+            
+            if exito_total:
+                logger.info("🔒 Todas las posiciones cerradas exitosamente en el exchange.")
+            
+            return exito_total
+            
+        except Exception as e:
+            logger.error(f"❌ Error crítico en cierre de pánico: {e}")
+            return False
+    
+    def obtener_tasas_fondeo(self, symbol: str) -> float:
+        """Obtiene la tasa de fondeo actual."""
+        try:
+            funding = self._exchange.fetch_funding_rate(symbol)
+            return funding.get('fundingRate', 0)
+        except Exception as e:
+            logger.error(f"❌ Error obteniendo tasa de fondeo: {e}")
+            return 0
+    
+    def transferir_a_futuros(self, cantidad: float) -> bool:
+        """Transfiere saldo de spot a futuros."""
+        try:
+            if self.exchange_id not in ['binance']:
+                logger.warning(f"⚠️ Transferencia no soportada en {self.exchange_id}")
+                return False
+            
+            result = self._exchange.transfer(
+                currency='USDT',
+                amount=cantidad,
+                fromWallet='spot',
+                toWallet='future'
+            )
+            
+            logger.info(f"💰 Transferido {cantidad} USDT a futuros")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error en transferencia: {e}")
+            return False
+    
+    def obtener_ordenes_abiertas(self, symbol: str) -> List[Dict[str, Any]]:
+        """Obtiene las órdenes abiertas para un símbolo."""
+        try:
+            ordenes = self._exchange.fetch_open_orders(symbol)
+            return ordenes
+        except Exception as e:
+            logger.error(f"❌ Error obteniendo órdenes: {e}")
+            return []
+    
+    def cancelar_orden(self, orden_id: str, symbol: str) -> bool:
+        """Cancela una orden."""
+        try:
+            self._exchange.cancel_order(orden_id, symbol)
+            logger.info(f"❌ Orden cancelada: {orden_id}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error cancelando orden: {e}")
+            return False
+    
+    def obtener_orden(self, orden_id: str, symbol: str) -> Optional[Dict[str, Any]]:
+        """Obtiene el estado de una orden."""
+        try:
+            orden = self._exchange.fetch_order(orden_id, symbol)
+            return orden
+        except Exception as e:
+            logger.error(f"❌ Error obteniendo orden: {e}")
+            return None
+    
+    def cerrar(self) -> None:
+        """Cierra la conexión del exchange."""
+        try:
+            if self._exchange:
+                logger.info(f"🔒 Conexión cerrada: {self.exchange_id}")
+        except Exception as e:
+            logger.error(f"❌ Error cerrando exchange: {e}")
