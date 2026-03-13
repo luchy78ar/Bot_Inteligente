@@ -275,7 +275,7 @@ def index():
         </div>
         <script>
             // Recarga suave cada 5 segundos para máxima fluidez
-            setTimeout(() => { window.location.reload(); }, 5000);
+            setTimeout(() => {{ window.location.reload(); }}, 5000);
         </script>
     </body>
     </html>
