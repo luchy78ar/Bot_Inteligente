@@ -85,7 +85,7 @@ class BotTelegram:
             self.app = Application.builder().token(self.token).build()
             
             # Configurar webhook
-            await self.app.bot.set_web_url(webhook_url)
+            await self.app.bot.set_webhook(webhook_url)
             
             self.app.add_handler(CommandHandler("start", self._cmd_start))
             self.app.add_handler(CommandHandler("status", self._cmd_status))
