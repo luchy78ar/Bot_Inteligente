@@ -131,12 +131,36 @@ class ExchangeWrapper:
 
             logger.info(f"🔍 Obtener balance - API Key: {self.api_key[:10] if self.api_key else 'EMPTY'}..., testnet: {self.testnet}")
             balance = self._exchange.fetch_balance()
+            
+            # Buscar USDT en diferentes posiciones (Bybit puede devolver diferente estructura)
             usdt_balance = balance.get('USDT', {})
+            if not usdt_balance:
+                # Probar otras llaves comunes
+                for key in ['USDT', 'USDT0', 'USDT.S', 'total']:
+                    if key in balance:
+                        usdt_balance = balance[key]
+                        break
+            
+            total = free = used = 0
+            if isinstance(usdt_balance, dict):
+                total = usdt_balance.get('total', 0) or usdt_balance.get('totalUSDT', 0)
+                free = usdt_balance.get('free', 0)
+                used = usdt_balance.get('used', 0)
+            elif isinstance(usdt_balance, (int, float)):
+                total = usdt_balance
+            
+            # Si no hay USDT, buscar el total general
+            if total == 0 and 'total' in balance:
+                total = balance.get('total', 0)
+            if free == 0:
+                free = balance.get('free', {}).get('USDT', 0) if isinstance(balance.get('free', 0), dict) else balance.get('free', 0)
+            
+            logger.info(f"💰 Balance encontrado: total={total}, free={free}, used={used}")
             
             self._balance_cache = {
-                'total': usdt_balance.get('total', 0),
-                'free': usdt_balance.get('free', 0),
-                'used': usdt_balance.get('used', 0)
+                'total': float(total),
+                'free': float(free),
+                'used': float(used)
             }
             self._last_balance_fetch_time = ahora
             return self._balance_cache
