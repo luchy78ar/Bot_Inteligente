@@ -96,23 +96,20 @@ class BotTrading:
             if estado_db:
                 self.estado.pnl_realizado = estado_db.get('pnl_realizado', 0.0)
                 self.estado.ciclos_completados = estado_db.get('ciclos_completados', 0)
-                # FORZAR siempre testnet=True por seguridad
-                self.estado.testnet = True
-                await self.persistencia.actualizar_estado_bot(testnet=True)
+                self.estado.testnet = cfg.TESTNET
+                await self.persistencia.actualizar_estado_bot(testnet=cfg.TESTNET)
                 self.estado.symbol = estado_db.get('symbol', self.config.symbol)
                 self.simbolo_actual = self.estado.symbol
                 
                 # Actualizar config con el símbolo de la DB
                 self.config.symbol = self.simbolo_actual
-                logger.info(f"📂 Configuración cargada desde DB (testnet forzado=True)")
+                logger.info(f"📂 Configuración cargada desde DB (testnet={cfg.TESTNET})")
             else:
                 logger.info(f"📂 Configuración cargada desde perfil por defecto")
             
             # 3. Exchange
-            # SIEMPRE testnet=True por defecto (Inversión Real OFF)
-            # Forzar siempre testnet=True para seguridad
-            testnet = True
-            logger.info(f"🧪 Testnet: {testnet} (forzado por defecto)")
+            testnet = cfg.TESTNET
+            logger.info(f"🧪 Testnet: {testnet}")
             
             # Limpiar cache de exchange para forzar nueva conexión
             ExchangeFactory.clear_instances()
