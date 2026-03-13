@@ -120,14 +120,30 @@ class Persistencia:
             pnl_realizado REAL DEFAULT 0,
             ciclos_completados INTEGER DEFAULT 0,
             ultimo_update REAL,
-            perfil_actual TEXT DEFAULT 'default'
+            perfil_actual TEXT DEFAULT 'default',
+            testnet INTEGER DEFAULT 1,
+            symbol TEXT DEFAULT 'BTC/USDT:USDT'
         );
         
         -- Insertar estado inicial si no existe
-        INSERT OR IGNORE INTO estado_bot (id, running, direccion_actual, perfil_actual) VALUES (1, 0, 'neutral', 'default');
+        INSERT OR IGNORE INTO estado_bot (id, running, direccion_actual, perfil_actual, testnet, symbol) VALUES (1, 0, 'neutral', 'default', 1, 'BTC/USDT:USDT');
         """
+        
         await self._db.executescript(query)
         await self._db.commit()
+        
+        # Agregar columnas si no existen (para bases de datos antiguas)
+        try:
+            await self._db.execute("ALTER TABLE estado_bot ADD COLUMN testnet INTEGER DEFAULT 1")
+            await self._db.commit()
+        except:
+            pass
+        try:
+            await self._db.execute("ALTER TABLE estado_bot ADD COLUMN symbol TEXT DEFAULT 'BTC/USDT:USDT'")
+            await self._db.commit()
+        except:
+            pass
+            
         logger.info("📊 Tablas de SQLite creadas/verificadas")
     
     # =====================
