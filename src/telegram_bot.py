@@ -375,8 +375,19 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
                 temp_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⏳ PROCESANDO...", callback_data="none")]])
                 await query.edit_message_reply_markup(reply_markup=temp_kb)
                 
+                # Obtener estado actual
+                estado = await self.obtener_estado()
+                
+                # Verificar balance antes de iniciar
+                if not estado.get('running'):
+                    balance = estado.get('balance_total', 0)
+                    if balance < 10:
+                        await query.answer("⚠️ Balance insuficiente. Mínimo $10 USDT requeridos.", show_alert=True)
+                        self._transicion_en_curso = False
+                        return
+                
                 # Ejecutar acción en segundo plano
-                if (await self.obtener_estado()).get('running'): await self.detener_bot()
+                if estado.get('running'): await self.detener_bot()
                 else: await self.iniciar_bot()
                 
                 await asyncio.sleep(1.0)
