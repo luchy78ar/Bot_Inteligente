@@ -289,6 +289,32 @@ def get_status():
 def health():
     return jsonify({"status": "ok"})
 
+# Ruta de webhook para Telegram - se configura dinámicamente
+telegram_app = None
+
+def set_telegram_app(app):
+    global telegram_app
+    telegram_app = app
+
+@app.route('/webhook/<token>', methods=['POST'])
+async def telegram_webhook(token: str):
+    """Maneja las actualizaciones de Telegram."""
+    if telegram_app is None:
+        return jsonify({"error": "Telegram not configured"}), 500
+    
+    try:
+        from telegram import Update
+        from telegram.ext import JSONParser
+        
+        update_data = await request.get_json()
+        update = Update.de_json(update_data, telegram_app.bot)
+        
+        await telegram_app.process_update(update)
+        return jsonify({"ok": True})
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return jsonify({"error": str(e)}), 500
+
 import threading
 
 def iniciar_servidor(port=8080):

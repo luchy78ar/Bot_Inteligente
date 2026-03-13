@@ -20,7 +20,7 @@ from src.exchange_manager import ExchangeFactory, ExchangeWrapper
 from src.persistence import Persistencia
 from src.trading_logic import EstrategiaMartingala, ModoSalvavidas
 from src.telegram_bot import BotTelegram
-from src.web_server import iniciar_servidor, actualizar_estado
+from src.web_server import iniciar_servidor, actualizar_estado, set_telegram_app
 
 # Configuración de logging profesional
 logging.basicConfig(
@@ -169,6 +169,8 @@ class BotTrading:
             logger.info(f"💰 Estado inicial actualizado - Balance: {estado_inicial.get('balance_total', 0)}")
             
             # 8. Servidor Web
+            if self.telegram:
+                set_telegram_app(self.telegram.app)
             iniciar_servidor()
             
             return True

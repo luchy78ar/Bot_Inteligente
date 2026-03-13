@@ -77,7 +77,16 @@ class BotTelegram:
 
     async def iniciar(self) -> None:
         try:
+            from telegram.ext import Application
+            
+            # Usar webhooks con la URL de Koyeb
+            webhook_url = f"https://selected-daron-luchy78ar-d6c587c4.koyeb.app/webhook/{self.token}"
+            
             self.app = Application.builder().token(self.token).build()
+            
+            # Configurar webhook
+            await self.app.bot.set_web_url(webhook_url)
+            
             self.app.add_handler(CommandHandler("start", self._cmd_start))
             self.app.add_handler(CommandHandler("status", self._cmd_status))
             self.app.add_handler(CommandHandler("panic", self._cmd_panic))
@@ -88,11 +97,9 @@ class BotTelegram:
             await self.app.initialize()
             await self.app.start()
             
-            # No iniciar polling - el bot responderá automáticamente
-            # Usar un temporizador para actualizar el dashboard cada 30 segundos
             self._update_task = asyncio.create_task(self._actualizar_dashboard_loop())
             
-            logger.info("✅ Bot de Telegram NEXUS iniciado (sin polling)")
+            logger.info(f"✅ Bot de Telegram NEXUS iniciado con webhook: {webhook_url}")
         except Exception as e:
             logger.error(f"❌ Error iniciando Telegram: {e}")
 
