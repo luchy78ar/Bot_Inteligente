@@ -89,7 +89,11 @@ class BotTelegram:
             await self.app.start()
             
             self._update_task = asyncio.create_task(self._actualizar_dashboard_loop())
-            await self.app.updater.start_polling(drop_pending_updates=True)
+            
+            # Usar polling con drop_pending_updates para evitar conflictos
+            if self.app.updater:
+                await self.app.updater.start_polling(drop_pending_updates=True)
+            
             logger.info("✅ Bot de Telegram NEXUS iniciado")
         except Exception as e:
             logger.error(f"❌ Error iniciando Telegram: {e}")
