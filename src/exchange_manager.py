@@ -6,6 +6,7 @@ Manejo de conexiones a múltiples exchanges usando ccxt.
 import ccxt
 import logging
 import time
+import math
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 import ccxt
@@ -178,41 +179,112 @@ class ExchangeWrapper:
         balance = self.obtener_balance()
         return balance.get('free', 0)
     
-    def calcular_posicion_maxima(self, symbol: str, leverage: int, precio: float) -> float:
-        """Calcula la cantidad máxima de la posición basada en el balance disponible y apalancamiento."""
+    def obtener_info_symbolo(self, symbol: str) -> Dict[str, Any]:
+        """Obtiene información de límites y requisitos mínimos de un símbolo."""
         try:
-            balance = self.obtener_balance_disponible_usdt()
-            if balance <= 0:
-                logger.warning("⚠️ Balance disponible es 0, no se puede abrir posición")
-                return 0
-            
-            max_notional = balance * leverage
+            if not self._exchange.markets:
+                self._exchange.load_markets()
             
             mercado = self._exchange.markets.get(symbol, {})
-            cantidad_minima = 0.001
-            if mercado:
-                limits = mercado.get('limits', {})
-                amount_limits = limits.get('amount', {})
-                min_amount = amount_limits.get('min', 0.001)
-                max_amount = amount_limits.get('max', None)
-                cantidad_minima = min_amount if min_amount > 0.001 else 0.001
-                
-                if max_amount:
-                    max_notional = min(max_notional, max_amount * precio)
+            if not mercado:
+                return {'min_amount': 0.001, 'min_notional': 5.0, 'precision_amount': 3}
             
-            cantidad_maxima = max_notional / precio
+            limits = mercado.get('limits', {})
+            amount_limits = limits.get('amount', {})
+            cost_limits = limits.get('cost', {})
             
-            if cantidad_maxima < cantidad_minima:
-                logger.warning(f"⚠️ Balance insuficiente para posición mínima. Min: {cantidad_minima}, Disponible: {cantidad_maxima}")
-                return 0
+            min_amount = amount_limits.get('min', 0.001)
+            max_amount = amount_limits.get('max', None)
+            min_notional = cost_limits.get('min', 5.0)
             
-            cantidad_precision = self.cantidad_a_precision(symbol, cantidad_maxima)
+            precision = mercado.get('precision', {})
+            precision_amount = precision.get('amount', 3)
             
-            logger.info(f"📊 Posición máxima: {cantidad_precision} {symbol} (balance: {balance}, leverage: {leverage}x)")
-            return cantidad_precision
+            return {
+                'min_amount': min_amount if min_amount > 0.001 else 0.001,
+                'max_amount': max_amount,
+                'min_notional': min_notional if min_notional > 5.0 else 5.0,
+                'precision_amount': precision_amount
+            }
         except Exception as e:
-            logger.error(f"❌ Error calculando posición máxima: {e}")
-            return 0
+            logger.error(f"❌ Error obteniendo info símbolo: {e}")
+            return {'min_amount': 0.001, 'min_notional': 5.0, 'precision_amount': 3}
+    
+    def validar_leverage(self, symbol: str, leverage: int, balance: Optional[float] = None) -> Dict[str, Any]:
+        """
+        Valida si el leverage seleccionado es viable con el balance disponible.
+        Retorna: {
+            'valido': bool,
+            'leverage_minimo_necesario': int,
+            'leverage_maximo_permitido': int,
+            'balance_minimo_necesario': float,
+            'mensaje': str,
+            'sugerencia': str
+        }
+        """
+        try:
+            info_symbolo = self.obtener_info_symbolo(symbol)
+            min_notional = info_symbolo['min_notional']
+            
+            if balance is None:
+                balance = self.obtener_balance_disponible_usdt()
+            
+            leverage = int(leverage)
+            if leverage < 1:
+                leverage = 1
+            
+            leverage_max_permitido = 100
+            try:
+                tiers = self._exchange.fetch_leverage_tiers(symbol)
+                if tiers and 'tiers' in tiers:
+                    leverage_max_permitido = max([t.get('maxLeverage', 100) for t in tiers['tiers']])
+            except:
+                pass
+            
+            balance_actual_apalancado = balance * leverage
+            es_suficiente = balance_actual_apalancado >= min_notional
+            
+            if es_suficiente:
+                return {
+                    'valido': True,
+                    'leverage_minimo_necesario': 1,
+                    'leverage_max_permitido': leverage_max_permitido,
+                    'balance_minimo_necesario': min_notional / leverage,
+                    'mensaje': f'✅ Leverage {leverage}x válido con balance ${balance:.2f}',
+                    'sugerencia': ''
+                }
+            
+            leverage_min_necesario = int(math.ceil(min_notional / balance)) if balance > 0 else min_notional
+            leverage_min_necesario = max(1, leverage_min_necesario)
+            
+            if leverage_min_necesario > leverage_max_permitido:
+                return {
+                    'valido': False,
+                    'leverage_minimo_necesario': leverage_min_necesario,
+                    'leverage_max_permitido': leverage_max_permitido,
+                    'balance_minimo_necesario': min_notional / leverage,
+                    'mensaje': f'⚠️ Balance insuficiente para {leverage}x',
+                    'sugerencia': f'❌ Necesitas al menos ${min_notional:.2f} USDT para operar. Aumenta tu balance o usa leverage ≥{leverage_min_necesario}x'
+                }
+            
+            return {
+                'valido': False,
+                'leverage_minimo_necesario': leverage_min_necesario,
+                'leverage_max_permitido': leverage_max_permitido,
+                'balance_minimo_necesario': min_notional / leverage,
+                'mensaje': f'⚠️ Balance insuficiente para {leverage}x',
+                'sugerencia': f'💡 Con ${balance:.2f} USDT, usa al menos {leverage_min_necesario}x de leverage para cumplir el mínimo de ${min_notional:.2f} USDT'
+            }
+        except Exception as e:
+            logger.error(f"❌ Error validando leverage: {e}")
+            return {
+                'valido': True,
+                'leverage_minimo_necesario': 1,
+                'leverage_max_permitido': 100,
+                'balance_minimo_necesario': 5.0,
+                'mensaje': '✅ Leverage válido',
+                'sugerencia': ''
+            }
     
     def obtener_precio_actual(self, symbol: str) -> float:
         """Obtiene el precio actual (Last Price) de forma ultra-rápida."""

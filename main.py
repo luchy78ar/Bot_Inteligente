@@ -150,7 +150,8 @@ class BotTrading:
                     self.listar_perfiles,
                     self.eliminar_perfil,
                     self.resetear_estadisticas,
-                    self.reset_maestro
+                    self.reset_maestro,
+                    lambda: self.exchange
                 )
                 await self.telegram.iniciar()
             

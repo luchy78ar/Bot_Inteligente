@@ -49,7 +49,8 @@ class BotTelegram:
                  listar_perfiles_callback: Optional[Callable[[], Awaitable[list]]] = None,
                  eliminar_perfil_callback: Optional[Callable[[str], Awaitable[bool]]] = None,
                  reset_stats_callback: Optional[Callable[[], Awaitable[bool]]] = None,
-                 reset_maestro_callback: Optional[Callable[[], Awaitable[bool]]] = None):
+                 reset_maestro_callback: Optional[Callable[[], Awaitable[bool]]] = None,
+                 obtener_exchange_callback: Optional[Callable[[], Any]] = None):
         
         self.token = token
         self.admin_id = str(admin_id)
@@ -65,6 +66,7 @@ class BotTelegram:
         self.eliminar_perfil = eliminar_perfil_callback
         self.reset_stats = reset_stats_callback
         self.reset_maestro = reset_maestro_callback
+        self.obtener_exchange = obtener_exchange_callback
         
         self.app: Optional[Application] = None
         self._chat_id: Optional[str] = None
@@ -474,7 +476,21 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
             await query.edit_message_text(f"⚙️ <b>MODIFICAR {m.upper()}</b>", reply_markup=kb, parse_mode='HTML')
         elif data.startswith("num_"):
             p = data.replace("num_", "").rsplit("_", 1)
-            await self.cambiar_config(p[0], int(p[1]) if p[0] in ['leverage', 'max_dca_levels'] else float(p[1]))
+            param = p[0]
+            valor = int(p[1]) if param in ['leverage', 'max_dca_levels'] else float(p[1])
+            
+            if param == 'leverage' and self.obtener_exchange:
+                try:
+                    exchange = self.obtener_exchange()
+                    estado = await self.obtener_estado()
+                    simbolo = estado.get('config', {}).get('symbol', 'BTC/USDT:USDT')
+                    validacion = exchange.validar_leverage(simbolo, valor)
+                    if not validacion.get('valido', True):
+                        await query.answer(validacion.get('sugerencia', 'Balance insuficiente'), show_alert=True)
+                except Exception as e:
+                    pass
+            
+            await self.cambiar_config(param, valor)
             texto, keyboard = self._crear_menu_config(await self.obtener_estado())
             await query.edit_message_text(texto, reply_markup=keyboard, parse_mode='HTML')
         elif data == "cfg_tp_inteligente":
@@ -518,6 +534,19 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
             val = float(update.message.text)
             if self._custom_param in ['leverage', 'max_dca_levels']: val = int(val)
             else: val = val / 100
+            
+            if self._custom_param == 'leverage' and self.obtener_exchange:
+                try:
+                    exchange = self.obtener_exchange()
+                    estado = await self.obtener_estado()
+                    simbolo = estado.get('config', {}).get('symbol', 'BTC/USDT:USDT')
+                    validacion = exchange.validar_leverage(simbolo, val)
+                    if not validacion.get('valido', True):
+                        await update.message.reply_text(f"⚠️ {validacion.get('sugerencia', 'Balance insuficiente')}")
+                        self._custom_param = None
+                        return
+                except: pass
+            
             await self.cambiar_config(self._custom_param, val)
             await update.message.reply_text(f"✅ {self._custom_param} = {val}")
             self._custom_param = None
