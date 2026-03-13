@@ -285,12 +285,16 @@ def index():
 def get_status():
     return jsonify(estado_bot)
 
+@app.route('/health')
+def health():
+    return jsonify({"status": "ok"})
+
 import threading
 
 def iniciar_servidor(port=8080):
     """Inicia el servidor web en un hilo separado para no bloquear."""
     def run():
-        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False, threaded=True)
     
     t = threading.Thread(target=run, daemon=True)
     t.start()
