@@ -189,15 +189,23 @@ class ExchangeWrapper:
             max_notional = balance * leverage
             
             mercado = self._exchange.markets.get(symbol, {})
+            cantidad_minima = 0.001
             if mercado:
                 limits = mercado.get('limits', {})
                 amount_limits = limits.get('amount', {})
+                min_amount = amount_limits.get('min', 0.001)
                 max_amount = amount_limits.get('max', None)
+                cantidad_minima = min_amount if min_amount > 0.001 else 0.001
                 
                 if max_amount:
                     max_notional = min(max_notional, max_amount * precio)
             
             cantidad_maxima = max_notional / precio
+            
+            if cantidad_maxima < cantidad_minima:
+                logger.warning(f"⚠️ Balance insuficiente para posición mínima. Min: {cantidad_minima}, Disponible: {cantidad_maxima}")
+                return 0
+            
             cantidad_precision = self.cantidad_a_precision(symbol, cantidad_maxima)
             
             logger.info(f"📊 Posición máxima: {cantidad_precision} {symbol} (balance: {balance}, leverage: {leverage}x)")

@@ -88,13 +88,11 @@ class BotTelegram:
             await self.app.initialize()
             await self.app.start()
             
+            # No iniciar polling - el bot responderá automáticamente
+            # Usar un temporizador para actualizar el dashboard cada 30 segundos
             self._update_task = asyncio.create_task(self._actualizar_dashboard_loop())
             
-            # Usar polling con drop_pending_updates para evitar conflictos
-            if self.app.updater:
-                await self.app.updater.start_polling(drop_pending_updates=True)
-            
-            logger.info("✅ Bot de Telegram NEXUS iniciado")
+            logger.info("✅ Bot de Telegram NEXUS iniciado (sin polling)")
         except Exception as e:
             logger.error(f"❌ Error iniciando Telegram: {e}")
 
