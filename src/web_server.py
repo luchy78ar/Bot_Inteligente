@@ -1,9 +1,12 @@
 import time
+import asyncio
+import logging
 from datetime import datetime
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 import threading
 
 app = Flask(__name__)
+logger = logging.getLogger(__name__)
 persistencia = None
 estado_bot = {}
 
@@ -297,19 +300,20 @@ def set_telegram_app(app):
     telegram_app = app
 
 @app.route('/webhook/<token>', methods=['POST'])
-async def telegram_webhook(token: str):
+def telegram_webhook(token: str):
     """Maneja las actualizaciones de Telegram."""
     if telegram_app is None:
         return jsonify({"error": "Telegram not configured"}), 500
     
     try:
         from telegram import Update
-        from telegram.ext import JSONParser
+        import json
         
-        update_data = await request.get_json()
+        update_data = request.get_json()
         update = Update.de_json(update_data, telegram_app.bot)
         
-        await telegram_app.process_update(update)
+        # Usar run_async para procesar la actualización
+        asyncio.run(telegram_app.process_update(update))
         return jsonify({"ok": True})
     except Exception as e:
         logger.error(f"Webhook error: {e}")
