@@ -86,7 +86,7 @@ class BotTelegram:
         self.obtener_exchange = obtener_exchange_callback
         
         self.app: Optional[Application] = None
-        self._chat_id: Optional[str] = None
+        self._chat_id: Optional[str] = self.admin_id
         self._msg_dashboard_id: Optional[int] = None
         self._update_task: Optional[asyncio.Task] = None
         self._menu_activo: bool = False

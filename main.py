@@ -929,8 +929,14 @@ async def main():
                 if was_running:
                     logger.info("⚡ AUTO-ARRANQUE: Reanudando trading...")
                     await bot.iniciar_trading()
+                    # Si ya hay una posición o el bot inició, mostrar el panel en Telegram proactivamente
+                    if bot.telegram:
+                        await bot.telegram.forzar_refresco()
                 else:
                     logger.info("⏸️ BOT EN ESPERA: Usa Telegram para iniciar.")
+                    # Mostrar dashboard inicial aunque esté pausado
+                    if bot.telegram:
+                        await bot.telegram.forzar_refresco()
         except Exception as e_init:
             logger.warning(f"⚠️ Error inicializando: {e_init}. Solo Telegram y Web activos.")
         
