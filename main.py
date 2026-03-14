@@ -689,8 +689,8 @@ async def main():
         bot = BotTrading()
         
         # Inicializar persistencia
-        bot.persistencia = Persistencia()
-        await bot.persistencia.inicializar()
+        bot.persistencia = Persistencia(cfg.DB_PATH)
+        await bot.persistencia.conectar()
         
         # Cargar config desde DB
         config_db = await bot.persistencia.obtener_config()
