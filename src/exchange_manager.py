@@ -136,7 +136,11 @@ class ExchangeWrapper:
             max_intentos = 3
             for intento in range(max_intentos):
                 try:
-                    balance = self._exchange.fetch_balance()
+                    # En Bybit V5 (Unified Account), el balance suele estar bajo 'linear' para futuros USDT
+                    if self.exchange_id == 'bybit':
+                        balance = self._exchange.fetch_balance({'type': 'swap', 'category': 'linear'})
+                    else:
+                        balance = self._exchange.fetch_balance()
                     break
                 except Exception as api_err:
                     error_str = str(api_err)
@@ -145,32 +149,45 @@ class ExchangeWrapper:
                         logger.warning(f"⚠️ Bybit error 10016, reintento {intento+1}/{max_intentos} en {wait_time}s...")
                         time.sleep(wait_time)
                         continue
+                    # Si falla con 'type' swap, intentar por defecto
+                    if 'invalid' in error_str.lower() or 'type' in error_str.lower():
+                        balance = self._exchange.fetch_balance()
+                        break
                     raise
             
-            # Buscar USDT en diferentes posiciones (Bybit puede devolver diferente estructura)
-            usdt_balance = balance.get('USDT', {})
-            if not usdt_balance:
-                # Probar otras llaves comunes
-                for key in ['USDT', 'USDT0', 'USDT.S', 'total']:
-                    if key in balance:
-                        usdt_balance = balance[key]
-                        break
+            # Extraer USDT con logging detallado
+            usdt_data = balance.get('USDT', {})
+            logger.debug(f"🔍 Datos crudos de USDT: {usdt_data}")
             
             total = free = used = 0
-            if isinstance(usdt_balance, dict):
-                total = usdt_balance.get('total', 0) or usdt_balance.get('totalUSDT', 0)
-                free = usdt_balance.get('free', 0)
-                used = usdt_balance.get('used', 0)
-            elif isinstance(usdt_balance, (int, float)):
-                total = usdt_balance
+            if isinstance(usdt_data, dict):
+                total = usdt_data.get('total', 0)
+                free = usdt_data.get('free', 0)
+                used = usdt_data.get('used', 0)
+            elif isinstance(usdt_data, (int, float)):
+                total = usdt_data
             
-            # Si no hay USDT, buscar el total general
-            if total == 0 and 'total' in balance:
-                total = balance.get('total', 0)
-            if free == 0:
-                free = balance.get('free', {}).get('USDT', 0) if isinstance(balance.get('free', 0), dict) else balance.get('free', 0)
+            # Fallback para Unified Account de Bybit si no se encontró USDT
+            if total == 0 and self.exchange_id == 'bybit':
+                try:
+                    # En Bybit V5 unified, a veces viene en balance['info']['result']['list'][0]['totalEquity']
+                    info = balance.get('info', {})
+                    result = info.get('result', {})
+                    if isinstance(result, dict) and 'list' in result:
+                        assets = result['list'][0]
+                        total = float(assets.get('totalEquity', 0))
+                        free = float(assets.get('totalAvailableBalance', 0))
+                        used = total - free
+                        logger.info(f"💼 Balance detectado vía Bybit Unified: Total={total}, Free={free}")
+                except:
+                    pass
+
+            # Último recurso: buscar cualquier cosa que parezca un total en el balance general
+            if total == 0:
+                total = balance.get('total', {}).get('USDT', 0)
+                free = balance.get('free', {}).get('USDT', 0)
             
-            logger.info(f"💰 Balance encontrado: total={total}, free={free}, used={used}")
+            logger.info(f"💰 Balance final: total={total}, free={free}, used={used}")
             
             self._balance_cache = {
                 'total': float(total),
@@ -213,7 +230,8 @@ class ExchangeWrapper:
             balance = self.obtener_balance_disponible_usdt()
             balance_con_leverage = balance * leverage
             
-            cantidad_maxima = balance_con_leverage / precio
+            # Usar un margen de seguridad del 5% para evitar "Insufficient balance" por fees
+            cantidad_maxima = (balance_con_leverage * 0.95) / precio
             
             if cantidad_maxima < min_amount:
                 logger.warning(f"⚠️ Cantidad calculada ({cantidad_maxima}) menor al mínimo ({min_amount})")
@@ -252,17 +270,26 @@ class ExchangeWrapper:
             amount_limits = limits.get('amount', {})
             cost_limits = limits.get('cost', {})
             
-            min_amount = amount_limits.get('min', 0.001)
-            max_amount = amount_limits.get('max', None)
-            min_notional = cost_limits.get('min', 5.0)
+            min_amount = amount_limits.get('min')
+            max_amount = amount_limits.get('max')
+            min_notional = cost_limits.get('min')
             
             precision = mercado.get('precision', {})
             precision_amount = precision.get('amount', 3)
             
+            # Validar que no sean None antes de comparar
+            final_min_amount = 0.001
+            if min_amount is not None:
+                final_min_amount = max(min_amount, 0.0001)
+                
+            final_min_notional = 5.0
+            if min_notional is not None:
+                final_min_notional = max(min_notional, 1.0)
+            
             return {
-                'min_amount': min_amount if min_amount > 0.001 else 0.001,
+                'min_amount': final_min_amount,
                 'max_amount': max_amount,
-                'min_notional': min_notional if min_notional > 5.0 else 5.0,
+                'min_notional': final_min_notional,
                 'precision_amount': precision_amount
             }
         except Exception as e:
@@ -349,7 +376,10 @@ class ExchangeWrapper:
         """Normaliza el símbolo para CCXT/Bybit."""
         # Por defecto CCXT usa formato como SOL/USDT
         # Bybit USDT perpetual usa SOL/USDT:USDT
-        return symbol.replace(':USDT', '')
+        if self.exchange_id == 'bybit':
+            if ':' not in symbol:
+                return f"{symbol}:USDT"
+        return symbol.replace(':USDT', '') if self.exchange_id != 'bybit' else symbol
 
     def obtener_precio_actual(self, symbol: str) -> float:
         """Obtiene el precio actual (Last Price) de forma ultra-rápida."""
@@ -359,16 +389,8 @@ class ExchangeWrapper:
             if not self._exchange.markets:
                 self._exchange.load_markets()
             
-            # Normalizar símbolo para buscar en markets
-            symbol_norm = self._normalizar_symbol(symbol)
-            
-            # Verificar si el símbolo existe
-            if symbol not in self._exchange.markets and symbol_norm not in self._exchange.markets:
-                logger.warning(f"⚠️ Mercado no encontrado: {symbol} o {symbol_norm}")
-                logger.info(f"📋 Mercados disponibles: {list(self._exchange.markets.keys())[:10]}...")
-            
-            # Usar símbolo normalizado si existe
-            symbol_buscar = symbol_norm if symbol_norm in self._exchange.markets else symbol
+            # Normalizar símbolo
+            symbol_buscar = self._normalizar_symbol(symbol)
             
             ticker = self._exchange.fetch_ticker(symbol_buscar)
             precio = float(ticker.get('last', 0))
@@ -382,7 +404,8 @@ class ExchangeWrapper:
     def obtener_precio_mark(self, symbol: str) -> float:
         """Obtiene el precio mark (para liquidaciones)."""
         try:
-            ticker = self._exchange.fetch_ticker(symbol)
+            symbol_buscar = self._normalizar_symbol(symbol)
+            ticker = self._exchange.fetch_ticker(symbol_buscar)
             return ticker.get('markPrice', ticker.get('last', 0))
         except Exception as e:
             logger.error(f"❌ Error obteniendo precio mark: {e}")
@@ -391,7 +414,8 @@ class ExchangeWrapper:
     def obtener_precios(self, symbol: str) -> Dict[str, float]:
         """Obtiene varios precios de un símbolo."""
         try:
-            ticker = self._exchange.fetch_ticker(symbol)
+            symbol_buscar = self._normalizar_symbol(symbol)
+            ticker = self._exchange.fetch_ticker(symbol_buscar)
             return {
                 'last': ticker.get('last', 0),
                 'mark': ticker.get('markPrice', 0),
@@ -408,8 +432,7 @@ class ExchangeWrapper:
         """Obtiene datos OHLCV en formato DataFrame."""
         try:
             # Normalizar símbolo
-            symbol_norm = self._normalizar_symbol(symbol)
-            symbol_buscar = symbol_norm if symbol_norm in self._exchange.markets else symbol
+            symbol_buscar = self._normalizar_symbol(symbol)
             
             ohlcv = self._exchange.fetch_ohlcv(symbol_buscar, timeframe, limit=limite)
             
@@ -429,20 +452,31 @@ class ExchangeWrapper:
             return pd.DataFrame()
     
     def configurar_apalancamiento(self, symbol: str, leverage: int) -> bool:
-        """Configura el apalancamiento y el modo de margen (Fuerza tipo int)."""
+        """Configura el apalancamiento y el modo de margen."""
         try:
-            # Forzar conversión a entero para evitar error -1102 de Binance
+            symbol_buscar = self._normalizar_symbol(symbol)
             leverage_int = int(float(leverage))
             
-            # Forzar modo de margen cruzado (CROSS) para usar todo el balance
+            # Forzar modo de margen cruzado (CROSS)
             try:
-                self._exchange.set_margin_mode('CROSS', symbol)
-                logger.info(f"✅ Modo de margen CROSS configurado en {symbol}")
+                self._exchange.set_margin_mode('CROSS', symbol_buscar)
+                logger.info(f"✅ Modo de margen CROSS configurado en {symbol_buscar}")
             except Exception as e:
-                logger.debug(f"ℹ️ Info modo margen (puede que ya esté en CROSS): {e}")
+                logger.debug(f"ℹ️ Modo margen: {e}")
 
-            self._exchange.set_leverage(leverage_int, symbol)
-            logger.info(f"✅ Apalancamiento configurado: {leverage_int}x en {symbol}")
+            # En Bybit a veces es necesario pasar 'buy' o 'sell' si se está en modo Hedge
+            # pero en modo One-Way (por defecto) esto debería funcionar:
+            try:
+                self._exchange.set_leverage(leverage_int, symbol_buscar)
+                logger.info(f"✅ Apalancamiento configurado: {leverage_int}x en {symbol_buscar}")
+            except Exception as e:
+                if self.exchange_id == 'bybit':
+                    # Intento alternativo para Bybit si falla el estándar
+                    params = {'category': 'linear'}
+                    self._exchange.set_leverage(leverage_int, symbol_buscar, params)
+                    logger.info(f"✅ Apalancamiento Bybit configurado con params: {leverage_int}x en {symbol_buscar}")
+                else:
+                    raise e
             return True
         except Exception as e:
             logger.error(f"❌ Error configurando apalancamiento/margen: {e}")
