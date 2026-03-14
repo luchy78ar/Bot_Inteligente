@@ -5,6 +5,7 @@ Interfaz gráfica integrada, ordenada y en tiempo real.
 """
 import asyncio
 import logging
+import time
 from typing import Optional, Dict, Any, Callable, Awaitable
 from datetime import datetime
 
