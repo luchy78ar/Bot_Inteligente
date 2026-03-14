@@ -289,8 +289,8 @@ class BotTelegram:
         lado = str(estado.get('lado', 'NEUTRAL')).upper()
         direccion = "🟢 LONG" if lado == "LONG" else "🔴 SHORT"
         
-        tp_objetivo_pct = cfg.get('take_profit_pct', 0.01) * 100
-        prog_tp_raw = min(1.0, pnl_pct / tp_objetivo_pct) if (tp_objetivo_pct > 0 and pnl_pct > 0) else 0
+        tp_objetivo = cfg.get('take_profit_pct', 0.01)
+        prog_tp_raw = min(1.0, pnl_pct / 100 / tp_objetivo) if (tp_objetivo > 0 and pnl_pct > 0) else 0
         progreso_tp = int(prog_tp_raw * 100)
         filled_tp = int(prog_tp_raw * 15)
         if prog_tp_raw > 0 and filled_tp == 0: filled_tp = 1

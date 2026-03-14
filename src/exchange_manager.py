@@ -699,31 +699,62 @@ class ExchangeWrapper:
     def cerrar_todas_posiciones(self) -> bool:
         """Cierra todas las posiciones abiertas de forma radical (Pánico)."""
         try:
-            # 1. Obtener posiciones actuales (específico para Bybit V5)
+            logger.warning("🚨 PÁNICO: Iniciando cierre de TODAS las posiciones...")
+            
+            # 1. Obtener TODAS las posiciones actuales
             if self.exchange_id == 'bybit':
                 positions = self._exchange.fetch_positions(params={'category': 'linear'})
             else:
                 positions = self._exchange.fetch_positions()
-                
+            
+            logger.warning(f"🚨 PÁNICO: Posiciones encontradas: {len(positions)}")
+            
             exito_total = True
+            posiciones_cerradas = 0
             
             for pos in positions:
                 contracts = float(pos.get('contracts') or pos.get('size') or pos.get('info', {}).get('positionAmt', 0))
                 if abs(contracts) > 0.00001:
                     symbol = pos.get('symbol')
-                    logger.info(f"🚨 PÁNICO: Detectada posición en {symbol} ({contracts}). Cerrando de forma radical...")
+                    logger.warning(f"🚨 PÁNICO: Cerrando posición en {symbol} ({contracts})...")
                     
-                    # REUTILIZAR la lógica infalible de cerrar_posicion
-                    if not self.cerrar_posicion(symbol):
+                    # Cerrar esta posición específica
+                    resultado = self.cerrar_posicion(symbol)
+                    if resultado:
+                        posiciones_cerradas += 1
+                        logger.info(f"✅ PÁNICO: Posición en {symbol} cerrada")
+                    else:
                         exito_total = False
+                        logger.error(f"❌ PÁNICO: Error cerrando posición en {symbol}")
             
-            if exito_total:
-                logger.info("🔒 Todas las posiciones cerradas exitosamente en el exchange.")
+            # Esperar un poco para que el exchange procese
+            time.sleep(1)
             
-            return exito_total
+            # Verificar que no queden posiciones
+            if self.exchange_id == 'bybit':
+                positions_check = self._exchange.fetch_positions(params={'category': 'linear'})
+            else:
+                positions_check = self._exchange.fetch_positions()
+            
+            posiciones_restantes = 0
+            for pos in positions_check:
+                contracts = float(pos.get('contracts') or pos.get('size') or pos.get('info', {}).get('positionAmt', 0))
+                if abs(contracts) > 0.00001:
+                    posiciones_restantes += 1
+            
+            logger.warning(f"🚨 PÁNICO: Posiciones cerradas: {posiciones_cerradas}, Restantes: {posiciones_restantes}")
+            
+            if posiciones_restantes == 0:
+                logger.info("✅ PÁNICO: Todas las posiciones cerradas exitosamente.")
+                return True
+            else:
+                logger.error(f"❌ PÁNICO: Quedan {posiciones_restantes} posiciones abiertas.")
+                return False
             
         except Exception as e:
             logger.error(f"❌ Error crítico en cierre de pánico: {e}")
+            import traceback
+            logger.error(f"❌ Trace: {traceback.format_exc()}")
             return False
     
     def obtener_tasas_fondeo(self, symbol: str) -> float:

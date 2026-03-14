@@ -72,16 +72,19 @@ def index():
     lado_text = "COMPRA (LONG)" if lado == "LONG" else "VENTA (SHORT)" if lado == "SHORT" else "NEUTRAL"
     lado_color = "#02c076" if lado == "LONG" else "#f84960" if lado == "SHORT" else "#848e9c"
     
-    # Cálculos de progreso (Basados en ROE% Real para que coincida con la ganancia de capital)
-    tp_objetivo_pct = cfg.get('take_profit_pct', 0.01) * 100
-    progreso_tp = min(100, (pnl_pct / tp_objetivo_pct * 100)) if (tp_objetivo_pct > 0 and pnl_pct > 0) else 0
+    # Cálculos de progreso
+    tp_objetivo = cfg.get('take_profit_pct', 0.01) * 100  # Convertir a porcentaje para display
+    tp_objetivo_decimal = cfg.get('take_profit_pct', 0.01)  # Keep decimal for calculation
+    # pnl_pct ya es ROE% (ej: 1.5 para 1.5%)
+    progreso_tp = min(100, (pnl_pct / tp_objetivo_decimal * 100)) if (tp_objetivo_decimal > 0 and pnl_pct > 0) else 0
     
     dist_total_liq = abs(liq - entrada_breakeven)
     dist_actual_liq = abs(precio - entrada_breakeven)
     en_perdida = (lado == "LONG" and precio < entrada_breakeven) or (lado == "SHORT" and precio > entrada_breakeven)
     riesgo_liq = min(100, (dist_actual_liq / dist_total_liq * 100)) if (dist_total_liq > 0 and en_perdida) else 0
     
-    prog_next_dca = (estado_bot.get('proximidad_dca', 0) * 100)
+    # La proximidad_dca ya viene como decimal (0.0 a 1.0) de la API
+    prog_next_dca = min(100, (estado_bot.get('proximidad_dca', 0) * 100))
     progreso_total_dca = (dca_actual / dca_max * 100) if dca_max > 0 else 0
     
     # Formatear Liquidación

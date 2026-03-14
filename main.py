@@ -72,6 +72,9 @@ class BotTrading:
         
         self.simbolo_actual = self.config.symbol
         
+        # Capital base fijo para cada ciclo (se reinicia en cada ciclo nuevo)
+        self._capital_base_fijo = 0.0
+        
         # Componentes
         self.persistencia = Persistencia(cfg.DB_PATH)
         self.exchange: Optional[ExchangeWrapper] = None
@@ -410,7 +413,10 @@ class BotTrading:
             # 3. Resetear estadísticas
             await self.resetear_estadisticas()
             
-            # 4. Reiniciar motor si el usuario lo pide (aquí lo dejamos pausado por seguridad)
+            # 4. Resetear capital base fijo
+            self._capital_base_fijo = 0.0
+            
+            # 5. Reiniciar motor si el usuario lo pide (aquí lo dejamos pausado por seguridad)
             logger.info("✅ RESET MAESTRO COMPLETADO. Bot pausado y limpio.")
             return True
         except Exception as e:
@@ -443,32 +449,58 @@ class BotTrading:
                 tarea.cancel()
             self.tareas.clear()
 
-            # Obtener posiciones antes de cerrar
+            # Verificar posiciones actuales ANTES de cerrar
             posiciones_antes = self.exchange.obtener_posicion(self.simbolo_actual)
-            logger.warning(f"🚨 PÁNICO: Posición detectada: {posiciones_antes}")
+            logger.warning(f"🚨 PÁNICO: Posición detectada en símbolo actual: {posiciones_antes}")
             
+            # Llamar al método de cierre total del exchange
+            # Usar run_in_executor para no bloquear el loop async
             loop = asyncio.get_event_loop()
             exito_exchange = await loop.run_in_executor(None, self.exchange.cerrar_todas_posiciones)
             
-            # Verificar que realmente se cerró
-            posiciones_despues = self.exchange.obtener_posicion(self.simbolo_actual)
-            logger.warning(f"🚨 PÁNICO: Posición después de cerrar: {posiciones_despues}")
+            # Delay para que el exchange procese
+            await asyncio.sleep(2)
             
+            # Verificar que realmente se cerró - revisar todas las posiciones
+            posiciones_despues = self.exchange.obtener_posicion(self.simbolo_actual)
+            
+            # También verificar si hay otras posiciones abiertas
+            posiciones_todas = self.exchange._exchange.fetch_positions()
+            posiciones_abiertas = []
+            for pos in posiciones_todas:
+                contracts = float(pos.get('contracts') or pos.get('size') or 0)
+                if abs(contracts) > 0.00001:
+                    posiciones_abiertas.append(pos.get('symbol'))
+            
+            logger.warning(f"🚨 PÁNICO: Posición después de cerrar (símbolo actual): {posiciones_despues}")
+            logger.warning(f"🚨 PÁNICO: Total posiciones abiertas restantes: {posiciones_abiertas}")
+            
+            # Limpiar DB sin importar el resultado
             await self.persistencia.limpiar_posiciones()
+            
+            # Resetear capital base
+            self._capital_base_fijo = 0.0
             
             # Sincronización inmediata de dashboards
             estado_limpio = await self.obtener_estado()
             actualizar_estado(estado_limpio)
             if self.telegram: await self.telegram.forzar_refresco()
 
-            if exito_exchange:
+            if exito_exchange and len(posiciones_abiertas) == 0:
                 logger.info("✅ Pánico completado: Todas las posiciones cerradas y bot pausado.")
+                if self.telegram:
+                    await self.telegram.notificar("✅ <b>PÁNICO EJECUTADO</b>\n\nTodas las posiciones han sido cerradas exitosamente.")
+                return True
             else:
-                logger.error("❌ Pánico falló parcial o totalmente en el exchange.")
+                logger.error(f"❌ Pánico falló. Posiciones restantes: {posiciones_abiertas}")
+                if self.telegram:
+                    await self.telegram.notificar(f"⚠️ <b>PÁNICO PARCIAL</b>\n\nPosiciones restantes: {posiciones_abiertas}")
+                return False
             
-            return exito_exchange
         except Exception as e:
             logger.error(f"❌ Error en comando de pánico: {e}")
+            import traceback
+            logger.error(f"❌ Trace: {traceback.format_exc()}")
             return False
 
     async def iniciar_trading(self) -> None:
@@ -626,12 +658,17 @@ class BotTrading:
                 return
             
             logger.info(f"🔍 Buscando oportunidad de trading en {self.simbolo_actual}...")
-            # Usar balance fresco después de cerrar operación
-            balance = self.exchange.obtener_balance_fresco().get('total', 0)
-            logger.info(f"💰 Balance fresco: {balance}")
             
-            # Después de cada ciclo, usamos el balance actual
-            # La estrategia calculará el tamaño según initial_volume_pct (default 10%)
+            # USAR CAPITAL BASE FIJO - No usar balance fresco que incluye ganancias
+            # Si ya tenemos un capital base guardado, usarlo; sino guardar el actual como base
+            if not hasattr(self, '_capital_base_fijo') or self._capital_base_fijo <= 0:
+                balance_actual = self.exchange.obtener_balance_fresco().get('total', 0)
+                self._capital_base_fijo = balance_actual
+                logger.info(f"💰 Capital base inicial establecido: ${self._capital_base_fijo}")
+            
+            # Usar el capital base fijo para cálculos de tamaño de posición
+            balance = self._capital_base_fijo
+            logger.info(f"💰 Balance (capital base fijo): {balance}")
             
             analis = self.estrategia.analizar_y_decidir(self.simbolo_actual)
             logger.info(f"📊 Resultado análisis: direccion={analis.direccion}, tendencia={analis.tendencia}, confianza={analis.confianza}")
@@ -696,17 +733,36 @@ class BotTrading:
 
     async def _cerrar_con_profit(self, pnl_no_realizado: float) -> None:
         try:
-            # Obtener balance ANTES de cerrar
-            balance_antes = self.exchange.obtener_balance_fresco().get('total', 0)
+            balance_antes = self.exchange.obtener_balance_fresco()
+            balance_total_antes = balance_antes.get('total', 0)
+            balance_free_antes = balance_antes.get('free', 0)
             
             posiciones = await self.persistencia.obtener_posiciones_abiertas()
+            pnl_antes = pnl_no_realizado
+            
             exito, _ = await self.estrategia.cerrar_posiciones(posiciones, "tp")
             if exito:
-                # Obtener balance DESPUÉS de cerrar para calcular profit REAL
-                balance_despues = self.exchange.obtener_balance_fresco().get('total', 0)
-                profit_real = balance_despues - balance_antes
+                # Delay para que el exchange procese y actualice el balance
+                await asyncio.sleep(2)
                 
-                logger.info(f"💰 Balance antes: {balance_antes}, Después: {balance_despues}, Profit real: {profit_real}")
+                balance_despues = self.exchange.obtener_balance_fresco()
+                balance_total_despues = balance_despues.get('total', 0)
+                balance_free_despues = balance_despues.get('free', 0)
+                
+                # Calcular profit basado en balance total (más confiable)
+                profit_total = balance_total_despues - balance_total_antes
+                
+                logger.info(f"💰 Balance antes: total={balance_total_antes}, free={balance_free_antes}")
+                logger.info(f"💰 Balance después: total={balance_total_despues}, free={balance_free_despues}")
+                logger.info(f"💰 Profit calculado: {profit_total}")
+                
+                # Usar profit_total como fuente de verdad
+                # El profit_total puede ser positivo (ganancia) o negativo (pérdida)
+                profit_real = profit_total
+                
+                if profit_real < 0:
+                    logger.warning(f"⚠️ Profit negativo detectado: {profit_real}. Usando PNL no realizado: {pnl_antes}")
+                    profit_real = pnl_antes
                 
                 self.estado.pnl_realizado += profit_real
                 self.estado.ciclos_completados += 1
@@ -749,6 +805,9 @@ class BotTrading:
             exito, _ = await self.estrategia.cerrar_posiciones(posiciones, "sl")
             if exito:
                 self.estado.ciclos_completados += 1
+                
+                # Resetear capital base para el nuevo ciclo
+                self._capital_base_fijo = 0.0
                 
                 # Verificar límite de ciclos
                 max_ciclos = self.config.max_ciclos
