@@ -460,6 +460,17 @@ class BotTrading:
 
     async def iniciar_trading(self) -> None:
         if self.estado.running: return
+        
+        # Verificar si ya hay posición abierta antes de iniciar
+        pos_existente = self.exchange.obtener_posicion(self.simbolo_actual) if self.exchange else None
+        posiciones_db = await self.persistencia.obtener_posiciones_abiertas() if self.persistencia else []
+        
+        if pos_existente or posiciones_db:
+            logger.warning(f"⚠️ Ya hay posición abierta. No se puede iniciar until it's closed.")
+            if self.telegram:
+                await self.telegram.notificar("⚠️ Ya hay una posición abierta. Cierra la posición primero antes de iniciar.")
+            return
+        
         self.estado.running = True
         await self.persistencia.actualizar_estado_bot(running=True)
         # Actualización inicial web
@@ -575,6 +586,17 @@ class BotTrading:
 
     async def _buscar_nueva_oportunidad(self) -> None:
         try:
+            # PRIMERO: Verificar si ya hay posición abierta
+            pos_existente = self.exchange.obtener_posicion(self.simbolo_actual)
+            if pos_existente:
+                logger.info(f"⚠️ Ya existe posición abierta: {pos_existente.get('side')} {pos_existente.get('size')}. Esperando cierre...")
+                return
+            
+            posiciones_db = await self.persistencia.obtener_posiciones_abiertas()
+            if posiciones_db:
+                logger.info(f"⚠️ Ya hay posiciones en DB. Esperando cierre...")
+                return
+            
             logger.info(f"🔍 Buscando oportunidad de trading en {self.simbolo_actual}...")
             # Usar balance fresco después de cerrar operación
             balance = self.exchange.obtener_balance_fresco().get('total', 0)
