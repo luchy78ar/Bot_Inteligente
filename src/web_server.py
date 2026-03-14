@@ -26,14 +26,6 @@ def index():
     """Ruta raíz con Dashboard Profesional COMPACTO en Español."""
     logger.info(f"🌐 Acceso al Dashboard desde {request.remote_addr}")
     
-    # Forzar no cache
-    from flask import make_response
-    response = make_response(render_dashboard())
-    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-    response.headers['Pragma'] = 'no-cache'
-    response.headers['Expires'] = '0'
-    return response
-    
     if not estado_bot:
         return """
         <body style='background:#0b0e11; color:#eaecef; display:flex; justify-content:center; align-items:center; height:100vh; font-family:sans-serif;'>
