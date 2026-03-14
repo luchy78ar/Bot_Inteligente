@@ -402,7 +402,7 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
                 InlineKeyboardButton(f"📉 Niveles DCA: {max_dca_levels}", callback_data="menu_max_dca")
             ],
             [
-                InlineKeyboardButton(f"🔄 Ciclos: {'∞' if max_ciclos == 0 else max_ciclos}", callback_data="toggle_ciclos"),
+                InlineKeyboardButton(f"🔄 Ciclos: {'∞' if max_ciclos == 0 else max_ciclos}", callback_data="menu_ciclos"),
                 InlineKeyboardButton(f"📏 Step: {dca_step_pct:.2f}%", callback_data="menu_step")
             ],
             [
@@ -518,13 +518,6 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
                     await query.answer(f"❌ Error: {str(e)[:50]}", show_alert=True)
                 except:
                     pass
-        elif data == "toggle_ciclos":
-            st = await self.obtener_estado()
-            current = st['config'].get('max_ciclos', 0)
-            nuevo = 0 if current > 0 else 10
-            await self.cambiar_config('max_ciclos', nuevo)
-            texto, keyboard = self._crear_menu_config(await self.obtener_estado())
-            await query.edit_message_text(texto, reply_markup=keyboard, parse_mode='HTML')
         elif data == "reset_maestro":
             try:
                 await query.answer("🔥 Ejecutando Reset Maestro...", show_alert=False)
@@ -575,7 +568,7 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
             elif m == "mult_step": kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"{x}x", callback_data=f"num_step_multiplier_{x}") for x in [1.0, 1.1, 1.2, 1.5]], [InlineKeyboardButton("✏️ Custom", callback_data="custom_step_multiplier")], [InlineKeyboardButton("⬅️ Volver", callback_data="menu_config")]])
             elif m == "trailing": kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"{x}%", callback_data=f"num_trailing_distancia_{x/100}") for x in [0.1, 0.2, 0.3, 0.5]], [InlineKeyboardButton(f"{x}%", callback_data=f"num_trailing_distancia_{x/100}") for x in [1, 1.5, 2]], [InlineKeyboardButton("✏️ Custom", callback_data="custom_trailing_distancia")], [InlineKeyboardButton("⬅️ Volver", callback_data="menu_config")]])
             elif m == "volumen": kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"{x}%", callback_data=f"num_initial_volume_pct_{x/100}") for x in [5, 10, 15, 20]], [InlineKeyboardButton(f"{x}%", callback_data=f"num_initial_volume_pct_{x/100}") for x in [25, 30, 40, 50]], [InlineKeyboardButton("✏️ Custom", callback_data="custom_initial_volume_pct")], [InlineKeyboardButton("⬅️ Volver", callback_data="menu_config")]])
-            elif m == "max_ciclos": kb = InlineKeyboardMarkup([
+            elif m in ["ciclos", "max_ciclos"]: kb = InlineKeyboardMarkup([
                 [InlineKeyboardButton("2", callback_data="num_max_ciclos_2"), InlineKeyboardButton("4", callback_data="num_max_ciclos_4"), InlineKeyboardButton("6", callback_data="num_max_ciclos_6"), InlineKeyboardButton("8", callback_data="num_max_ciclos_8")],
                 [InlineKeyboardButton("10", callback_data="num_max_ciclos_10"), InlineKeyboardButton("15", callback_data="num_max_ciclos_15"), InlineKeyboardButton("20", callback_data="num_max_ciclos_20")],
                 [InlineKeyboardButton("30", callback_data="num_max_ciclos_30"), InlineKeyboardButton("50", callback_data="num_max_ciclos_50"), InlineKeyboardButton("∞", callback_data="num_max_ciclos_0")],
