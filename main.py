@@ -682,7 +682,8 @@ class BotTrading:
         if self.persistencia: await self.persistencia.cerrar()
 
 async def main():
-    # Web server ya iniciado en Dockerfile para healthcheck
+    # INICIAR WEB SERVER PRIMERO para healthcheck
+    iniciar_servidor()
     
     try:
         bot = BotTrading()
