@@ -640,16 +640,32 @@ class ExchangeWrapper:
             params = {'reduceOnly': True}
             if self.exchange_id == 'bybit':
                 params['category'] = 'linear'
+                params['positionIdx'] = 0 # 0 para modo One-way (Standard)
 
             logger.info(f"🔒 Cerrando {symbol_buscar} ({lado_actual.upper()}): {lado_orden.upper()} {cantidad_a_cerrar} (Market)")
             
-            orden = self._exchange.create_order(
-                symbol=symbol_buscar,
-                type='market',
-                side=lado_orden,
-                amount=cantidad_a_cerrar,
-                params=params
-            )
+            try:
+                orden = self._exchange.create_order(
+                    symbol=symbol_buscar,
+                    type='market',
+                    side=lado_orden,
+                    amount=cantidad_a_cerrar,
+                    params=params
+                )
+            except Exception as e_order:
+                # Si falla por reduce-only o similar, intentamos cierre BRUTO sin reduceOnly
+                if '110017' in str(e_order) or 'reduce-only' in str(e_order).lower():
+                    logger.warning("⚠️ Cierre con reduce-only falló. Intentando cierre radical sin restricción...")
+                    params.pop('reduceOnly', None)
+                    orden = self._exchange.create_order(
+                        symbol=symbol_buscar,
+                        type='market',
+                        side=lado_orden,
+                        amount=cantidad_a_cerrar,
+                        params=params
+                    )
+                else:
+                    raise e_order
             
             if orden:
                 logger.info(f"✅ Posición de {symbol_buscar} CERRADA con éxito.")
