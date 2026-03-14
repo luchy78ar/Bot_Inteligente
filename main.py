@@ -965,10 +965,14 @@ async def main():
                         logger.info(f"👑 [{bot._instance_id}] Tomando el control como Bot Maestro.")
                 else:
                     # No somos el maestro, dormir y no hacer nada pesado
+                    if bot.telegram: await bot.telegram.verificar_polling()
                     if ts % 30 == 0:
                         logger.info(f"💤 [{bot._instance_id}] En espera (Hay otro bot maestro activo: {id_maestro})")
                     await asyncio.sleep(5)
                     continue
+
+                # SOMOS MAESTRO
+                if bot.telegram: await bot.telegram.verificar_polling()
 
                 if bot and bot.exchange:
                     # Siempre verificar posición y actualizar web cada 5s

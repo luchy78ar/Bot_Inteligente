@@ -123,7 +123,7 @@ class BotTelegram:
             # Manejador de errores global
             self.app.add_error_handler(self._error_handler)
             
-            # 3. Inicializar y Arrancar Polling
+            # 3. Inicializar y Arrancar Polling (SOLO SI SOMOS MAESTRO)
             await self.app.initialize()
             await self.app.start()
             
@@ -131,24 +131,39 @@ class BotTelegram:
             try: await self.app.bot.delete_webhook()
             except: pass
             
-            await self.app.updater.start_polling()
+            await self.verificar_polling()
             
-            logger.info(f"✅ Bot de Telegram [{self._instance_id}] iniciado en modo POLLING.")
+            logger.info(f"✅ Bot de Telegram [{self._instance_id}] inicializado.")
             
-            # Tarea de actualización de dashboard (opcional, se inicia en main habitualmente)
             if not self._update_task:
                 self._update_task = asyncio.create_task(self._actualizar_dashboard_loop())
-                
         except Exception as e:
             logger.error(f"❌ Error al iniciar Telegram: {e}")
-            
-            # Inicializar marca de tiempo para evitar spam
-            self._last_edit_time = 0
-            
-            self._update_task = asyncio.create_task(self._actualizar_dashboard_loop())
-            
-        except Exception as e:
-            logger.error(f"❌ Error iniciando Telegram: {e}")
+            if not getattr(self, '_update_task', None):
+                self._update_task = asyncio.create_task(self._actualizar_dashboard_loop())
+                
+    async def verificar_polling(self) -> None:
+        """Verifica si debemos estar escuchando según nuestro estatus de maestro."""
+        if not self.app: return
+        
+        id_maestro = await self.persistencia.obtener_config("master_bot_id") if self.persistencia else self._instance_id
+        soy_maestro = (id_maestro == self._instance_id)
+
+        if soy_maestro:
+            if not self.app.updater.running:
+                logger.info(f"👑 [{self._instance_id}] Iniciando polling (Maestro activo)")
+                await self.app.updater.start_polling()
+        else:
+            if self.app.updater.running:
+                logger.info(f"💤 [{self._instance_id}] Deteniendo polling (Cediendo control)")
+                await self.app.updater.stop()
+
+    async def detener(self) -> None:
+        if self.app:
+            if self.app.updater.running:
+                await self.app.updater.stop()
+            await self.app.stop()
+            await self.app.shutdown()
 
     async def forzar_refresco(self, estado_externo: Optional[Dict[str, Any]] = None) -> None:
         """Actualiza el dashboard usando un estado proporcionado o consultando el actual."""
