@@ -294,10 +294,23 @@ def health():
 
 # Ruta de webhook para Telegram - se configura dinámicamente
 telegram_app = None
+_persistent_loop = None
 
 def set_telegram_app(app):
     global telegram_app
     telegram_app = app
+
+def _get_event_loop():
+    global _persistent_loop
+    try:
+        if _persistent_loop is None or _persistent_loop.is_closed():
+            _persistent_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(_persistent_loop)
+        return _persistent_loop
+    except:
+        _persistent_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_persistent_loop)
+        return _persistent_loop
 
 @app.route('/webhook/<token>', methods=['POST'])
 def telegram_webhook(token: str):
@@ -312,12 +325,8 @@ def telegram_webhook(token: str):
         update_data = request.get_data()
         update = Update.de_json(json.loads(update_data), telegram_app.bot)
         
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(telegram_app.process_update(update))
-        finally:
-            loop.close()
+        loop = _get_event_loop()
+        loop.run_until_complete(telegram_app.process_update(update))
         
         return jsonify({"ok": True})
     except Exception as e:
