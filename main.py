@@ -211,6 +211,9 @@ class BotTrading:
                     'posiciones': [],
                     'pnl_realizado': self.estado.pnl_realizado,
                     'ciclos_completados': self.estado.ciclos_completados,
+                    'config': self.config.to_dict(),
+                    'dca_level': 0,
+                    'lado': 'NEUTRAL',
                     'error': 'Exchange no conectado'
                 }
             
