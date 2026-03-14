@@ -300,26 +300,38 @@ class ExchangeWrapper:
                 'sugerencia': ''
             }
     
+    def _normalizar_symbol(self, symbol: str) -> str:
+        """Normaliza el símbolo para CCXT/Bybit."""
+        # Por defecto CCXT usa formato como SOL/USDT
+        # Bybit USDT perpetual usa SOL/USDT:USDT
+        return symbol.replace(':USDT', '')
+
     def obtener_precio_actual(self, symbol: str) -> float:
         """Obtiene el precio actual (Last Price) de forma ultra-rápida."""
+        symbol_original = symbol
         try:
             # Asegurar que el mercado esté cargado
             if not self._exchange.markets:
                 self._exchange.load_markets()
             
-            # Verificar si el símbolo existe
-            if symbol not in self._exchange.markets:
-                # Intentar normalizar
-                symbol_norm = symbol.replace('/USDT:USDT', '/USDT')
-                if symbol_norm in self._exchange.markets:
-                    symbol = symbol_norm
-                else:
-                    logger.warning(f"⚠️ Mercado no encontrado: {symbol}")
+            # Normalizar símbolo para buscar en markets
+            symbol_norm = self._normalizar_symbol(symbol)
             
-            ticker = self._exchange.fetch_ticker(symbol)
-            return float(ticker.get('last', 0))
+            # Verificar si el símbolo existe
+            if symbol not in self._exchange.markets and symbol_norm not in self._exchange.markets:
+                logger.warning(f"⚠️ Mercado no encontrado: {symbol} o {symbol_norm}")
+                logger.info(f"📋 Mercados disponibles: {list(self._exchange.markets.keys())[:10]}...")
+            
+            # Usar símbolo normalizado si existe
+            symbol_buscar = symbol_norm if symbol_norm in self._exchange.markets else symbol
+            
+            ticker = self._exchange.fetch_ticker(symbol_buscar)
+            precio = float(ticker.get('last', 0))
+            if precio > 0:
+                logger.info(f"💹 Precio {symbol_buscar}: {precio}")
+            return precio
         except Exception as e:
-            logger.error(f"❌ Error obteniendo precio de {symbol}: {e}")
+            logger.error(f"❌ Error obteniendo precio de {symbol_original}: {e}")
             return 0.0
     
     def obtener_precio_mark(self, symbol: str) -> float:
