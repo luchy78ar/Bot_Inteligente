@@ -662,8 +662,12 @@ class ExchangeWrapper:
     def cerrar_todas_posiciones(self) -> bool:
         """Cierra todas las posiciones abiertas de forma radical (Pánico)."""
         try:
-            # 1. Obtener posiciones actuales
-            positions = self._exchange.fetch_positions()
+            # 1. Obtener posiciones actuales (específico para Bybit V5)
+            if self.exchange_id == 'bybit':
+                positions = self._exchange.fetch_positions(params={'category': 'linear'})
+            else:
+                positions = self._exchange.fetch_positions()
+                
             exito_total = True
             
             for pos in positions:

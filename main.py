@@ -355,6 +355,8 @@ class BotTrading:
             logger.info("🔥 Iniciando RESET MAESTRO...")
             # 1. Detener trading
             self.estado.running = False
+            await self.persistencia.actualizar_estado_bot(running=False)
+            
             for tarea in self.tareas: tarea.cancel()
             self.tareas.clear()
             
@@ -365,16 +367,13 @@ class BotTrading:
             # 3. Resetear estadísticas
             await self.resetear_estadisticas()
             
-            # 4. Actualizar estado y persistencia
-            await self.persistencia.actualizar_estado_bot(running=False)
-            
-            # 5. Reiniciar motor
-            await self.iniciar_trading()
-            logger.info("✅ RESET MAESTRO COMPLETADO. Bot reiniciado desde cero.")
+            # 4. Reiniciar motor si el usuario lo pide (aquí lo dejamos pausado por seguridad)
+            logger.info("✅ RESET MAESTRO COMPLETADO. Bot pausado y limpio.")
             return True
         except Exception as e:
             logger.error(f"❌ Error en Reset Maestro: {e}")
             return False
+
     async def reconectar_exchange(self) -> bool:
         try:
             if self.estado.running: await self.detener_trading()
@@ -392,7 +391,11 @@ class BotTrading:
         """Cierre total de Pánico: cierra todas las posiciones del exchange."""
         try:
             logger.warning("🚨 PÁNICO: Solicitando cierre total en el Exchange...")
+            
+            # BLOQUEAR RE-ENTRADA INMEDIATAMENTE EN DB
             self.estado.running = False
+            await self.persistencia.actualizar_estado_bot(running=False)
+            
             for tarea in self.tareas: 
                 tarea.cancel()
             self.tareas.clear()
@@ -401,7 +404,6 @@ class BotTrading:
             exito_exchange = await loop.run_in_executor(None, self.exchange.cerrar_todas_posiciones)
             
             await self.persistencia.limpiar_posiciones()
-            await self.persistencia.actualizar_estado_bot(running=False)
             
             # Sincronización inmediata de dashboards
             estado_limpio = await self.obtener_estado()
@@ -409,7 +411,7 @@ class BotTrading:
             if self.telegram: await self.telegram.forzar_refresco()
 
             if exito_exchange:
-                logger.info("✅ Pánico completado: Todas las posiciones cerradas.")
+                logger.info("✅ Pánico completado: Todas las posiciones cerradas y bot pausado.")
             else:
                 logger.error("❌ Pánico falló parcial o totalmente en el exchange.")
             
@@ -433,17 +435,22 @@ class BotTrading:
         """Detiene el bot y cierra la posición abierta inmediatamente."""
         try:
             logger.warning("🛑 Deteniendo trading y cerrando posición activa...")
+            
+            # 1. BLOQUEAR RE-ENTRADA (PERSISTENCIA)
             self.estado.running = False
+            await self.persistencia.actualizar_estado_bot(running=False)
+            
+            # 2. CANCELAR TAREAS DE MONITOREO
             for tarea in self.tareas: 
                 tarea.cancel()
             self.tareas.clear()
             
-            # Cierre radical de la posición actual usando executor
+            # 3. CIERRE RADICAL EN EL EXCHANGE
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, self.exchange.cerrar_posicion, self.simbolo_actual)
             
+            # 4. LIMPIEZA DE DATOS LOCALES
             await self.persistencia.limpiar_posiciones()
-            await self.persistencia.actualizar_estado_bot(running=False)
             
             # Sincronización inmediata de dashboards
             estado_fresco = await self.obtener_estado()
@@ -665,9 +672,18 @@ class BotTrading:
 async def main():
     bot = BotTrading()
     if await bot.inicializar():
-        # FORZAR INICIO DE TRADING AUTOMÁTICO
-        await bot.iniciar_trading()
-        logger.info("⚡ AUTO-ARRANQUE: Trading iniciado automáticamente")
+        # AUTO-ARRANQUE INTELIGENTE (Solo si estaba running en la DB)
+        estado_db = await bot.persistencia.obtener_estado_bot()
+        was_running = estado_db.get('running', False) if estado_db else False
+        
+        if was_running:
+            logger.info("⚡ AUTO-ARRANQUE: Reanudando trading según estado previo...")
+            await bot.iniciar_trading()
+        else:
+            logger.info("⏸️ BOT EN ESPERA: El trading está pausado. Usa Telegram para iniciar.")
+            # Sincronizar dashboard web inicial aunque esté pausado
+            estado_inicial = await bot.obtener_estado()
+            actualizar_estado(estado_inicial)
         
         try:
             while True: await asyncio.sleep(1)
