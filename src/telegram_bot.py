@@ -349,7 +349,7 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
                 InlineKeyboardButton(f"🎯 TP: {cfg.get('take_profit_pct')*100:.1f}%", callback_data="menu_tp")
             ],
             [
-                InlineKeyboardButton(f"🔄 Ciclos: {cfg.get('max_ciclos') if cfg.get('max_ciclos', 0) > 0 else '∞'}", callback_data="menu_max_ciclos"),
+                InlineKeyboardButton(f"🔄 Ciclos: {'∞' if cfg.get('max_ciclos', 0) == 0 else cfg.get('max_ciclos')}", callback_data="toggle_ciclos"),
                 InlineKeyboardButton(f"📉 Niveles DCA: {cfg.get('max_dca_levels')}", callback_data="menu_max_dca")
             ],
             [
@@ -433,6 +433,13 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
                 await query.edit_message_text(texto, reply_markup=keyboard, parse_mode='HTML')
             except Exception as e:
                 if "Message is not modified" not in str(e): logger.error(f"❌ Error config: {e}")
+        elif data == "toggle_ciclos":
+            st = await self.obtener_estado()
+            current = st['config'].get('max_ciclos', 0)
+            nuevo = 0 if current > 0 else 10
+            await self.cambiar_config('max_ciclos', nuevo)
+            texto, keyboard = self._crear_menu_config(await self.obtener_estado())
+            await query.edit_message_text(texto, reply_markup=keyboard, parse_mode='HTML')
         elif data == "reset_maestro":
             try:
                 await query.answer("🔥 Ejecutando Reset Maestro...", show_alert=False)
