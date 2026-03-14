@@ -237,8 +237,8 @@ class BotTrading:
                 # Si hay posición en el exchange, ella manda sobre la DB
                 if not posiciones_db:
                     logger.info(f"🔍 SYNC: Detectada posición externa. Importando...")
-                    # Crear objeto temporal para cálculo inmediato
-                    pos_temp = Posicion(
+                    # Crear y GUARDAR posición en DB para persistencia
+                    pos_db = Posicion(
                         order_id="sync_init", symbol=self.simbolo_actual,
                         side=OrderSide.LONG if pos_exchange['side'] == 'long' else OrderSide.SHORT,
                         entry_price=pos_exchange['entry_price'],
@@ -246,7 +246,9 @@ class BotTrading:
                         leverage=pos_exchange['leverage'],
                         dca_level=0, timestamp=datetime.now().timestamp()
                     )
-                    info_posiciones = await self.estrategia.obtener_info_posiciones([pos_temp])
+                    await self.persistencia.guardar_posicion(pos_db)
+                    posiciones_db = [pos_db]
+                    info_posiciones = await self.estrategia.obtener_info_posiciones([pos_db])
                 else:
                     # Usar la lógica de la estrategia para calcular métricas reales
                     info_posiciones = await self.estrategia.obtener_info_posiciones(posiciones_db)
