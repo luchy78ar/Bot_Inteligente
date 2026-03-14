@@ -389,8 +389,15 @@ class BotTelegram:
         
         emoji_pnl = "💰" if pnl >= 0 else "📉"
         pnl_text = f"+${abs(pnl):,.2f}" if pnl >= 0 else f"-${abs(pnl):,.2f}"
-        roe_val = f"+{pnl_pct:.2f}%" if pnl_pct >= 0 else f"{pnl_pct:.2f}%"
-        roe_label = "🟢 ROE%" if pnl_pct >= 0 else "🔴 ROE%"
+        
+        # ROE Real (como el exchange)
+        roe_real = estado.get('roe_real_pct', pnl_pct)
+        roe_val = f"+{roe_real:.2f}%" if roe_real >= 0 else f"{roe_real:.2f}%"
+        roe_label = "🟢 ROE (Exchange)" if roe_real >= 0 else "🔴 ROE (Exchange)"
+        
+        # PNL sobre Cartera Total
+        roe_cartera = f"{pnl_pct:+.2f}%"
+        roe_cartera_label = "ROE Cartera"
 
         lev = cfg.get('leverage', 10)
         dca_step = cfg.get('dca_step_pct', 0) * 100
@@ -406,8 +413,9 @@ class BotTelegram:
 <b>🚀 NEXUS PRO SYSTEM - {symbol}</b>
 <code>{linea}</code>
 
-{roe_label}: <b>{roe_val}</b> ({lev}x)
-{emoji_pnl} PNL: <b>{pnl_text}</b>
+{roe_label}: <b>{roe_val}</b>
+{emoji_pnl} PNL Neto: <b>{pnl_text}</b>
+📊 {roe_cartera_label}: <b>{roe_cartera}</b>
 📉 Max. Drawdown: <b>{max_dd:.2f}%</b>
 
 📐 {direccion} | ⏱️ {tiempo} | 🔄 Ciclos: <b>{ciclos_fmt}</b>
@@ -501,17 +509,15 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
         data = query.data
         user_id = str(query.from_user.id)
         
-        # 0. VERIFICAR SI SOMOS EL MAESTRO (Evitar bots zombie)
+        # 0. VERIFICAR SI SOMOS EL MAESTRO (Solo para logs, permitimos clics en todos)
+        es_maestro = True
         if self.persistencia:
             id_maestro = await self.persistencia.obtener_config("master_bot_id")
             if id_maestro and id_maestro != self._instance_id:
-                # Los bots no maestros también responden para que el spinner se quite silenciosamente
-                try: await query.answer()
-                except: pass
-                logger.debug(f"🔇 [{self._instance_id}] Ignorando click (Master actual es: {id_maestro})")
-                return
-
-        # 1. Quitar spinner inmediatamente
+                es_maestro = False
+                logger.info(f"🖱️ [{self._instance_id}] Click recibido (No soy maestro, pero proceso)")
+        
+        # 0.1 Respuesta inmediata para quitar spinner (ÚNICA RESPUESTA)
         try: await query.answer()
         except: pass
         

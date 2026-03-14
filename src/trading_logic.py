@@ -297,13 +297,13 @@ class EstrategiaMartingala:
 
             # 3. MÉTRICAS DE CAPITAL REALES (VISIBILIDAD PARA EL USUARIO)
             pnl = float(pos_info.get('unrealized_pnl', 0))
+            margin = float(pos_info.get('margin', 0))
             
-            # Obtener el capital base que el usuario realmente tiene destinado a este bot
-            # Usamos self.config.capital_base si estuviera definido, o el balance disponible como aproximación
+            # ROE Real (como el exchange): Beneficio / Margen * 100
+            roe_real_pct = (pnl / margin * 100) if margin > 0 else 0
+            
+            # PNL sobre Capital Total (Cartera)
             balance_fresco = self.exchange.obtener_balance_fresco().get('total', 0)
-            
-            # El PNL% que el usuario quiere ver es: (Ganancia $ / Capital Total) * 100
-            # Si el usuario tiene $18 y gana $0.18, quiere ver 1%
             pnl_visual_pct = (pnl / balance_fresco * 100) if balance_fresco > 0 else 0
             
             # 4. PROXIMIDAD DCA - Basada en el Step Dinámico desde el AVG
@@ -338,7 +338,9 @@ class EstrategiaMartingala:
                 'lado': lado,
                 'pnl': pnl,
                 'pnl_pct': pnl_visual_pct, # PNL real sobre capital total
-                'capital_invertido': balance_fresco, 
+                'roe_real_pct': roe_real_pct, # ROE real sobre margen
+                'posiciones': len(posiciones),
+                'capital_invertido': margin,
                 'inversion_apalancada': total_qty * precio_actual,
                 'nivel_dca': max(p.dca_level for p in posiciones),
                 'proximidad_dca': max(0, proximidad_dca),
