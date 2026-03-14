@@ -10,11 +10,6 @@ logger = logging.getLogger(__name__)
 persistencia = None
 estado_bot = {}
 
-@app.route('/health', methods=['GET'])
-def health():
-    """Health check endpoint for Koyeb."""
-    return jsonify({'status': 'ok', 'timestamp': datetime.now().isoformat()}), 200
-
 def actualizar_estado(nuevo_estado):
     global estado_bot
     estado_bot.update(nuevo_estado)
