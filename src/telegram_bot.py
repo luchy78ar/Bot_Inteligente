@@ -70,7 +70,8 @@ class BotTelegram:
                  eliminar_perfil_callback: Optional[Callable[[str], Awaitable[bool]]] = None,
                  reset_stats_callback: Optional[Callable[[], Awaitable[bool]]] = None,
                  reset_maestro_callback: Optional[Callable[[], Awaitable[bool]]] = None,
-                 obtener_exchange_callback: Optional[Callable[[], Any]] = None):
+                 obtener_exchange_callback: Optional[Callable[[], Any]] = None,
+                 persistencia: Optional[Any] = None):
         
         self.token = token
         self.admin_id = str(admin_id)
@@ -87,6 +88,7 @@ class BotTelegram:
         self.reset_stats = reset_stats_callback
         self.reset_maestro = reset_maestro_callback
         self.obtener_exchange = obtener_exchange_callback
+        self.persistencia = persistencia
         
         self.app: Optional[Application] = None
         self._chat_id: Optional[str] = self.admin_id
@@ -142,6 +144,9 @@ class BotTelegram:
                     break
             
             logger.info(f"✅ Bot de Telegram [{self._instance_id}] iniciado.")
+            
+            # Inicializar marca de tiempo para evitar spam
+            self._last_edit_time = 0
             
             self._update_task = asyncio.create_task(self._actualizar_dashboard_loop())
             
@@ -238,17 +243,23 @@ class BotTelegram:
             logger.error(f"❌ Error enviando notificación: {e}")
 
     async def _actualizar_dashboard_loop(self) -> None:
-        _ultima_actualizacion = 0
         while True:
             try:
-                await asyncio.sleep(15) # Aumentar a 15s para seguridad extrema
+                # Frecuencia reducida de refresco automático
+                await asyncio.sleep(60)
+                
                 if not self._msg_dashboard_id or self._menu_activo or self._transicion_en_curso:
                     continue
-                # Solo actualizar cada 15 segundos como máximo
-                ahora = datetime.now().timestamp()
-                if ahora - _ultima_actualizacion >= 15:
-                    await self.forzar_refresco()
-                    _ultima_actualizacion = ahora
+                
+                ahora = time.time()
+                if ahora < self._retry_after_edit_until:
+                    continue
+                    
+                # Evitar editar muy seguido (mínimo 15s entre ediciones automáticas)
+                if ahora - getattr(self, '_last_edit_time', 0) < 15:
+                    continue
+                
+                await self.forzar_refresco()
             except asyncio.CancelledError: break
             except Exception as e:
                 logger.error(f"❌ Error en bucle Telegram: {e}")
@@ -436,13 +447,6 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
         ])
         return texto, kb
 
-    def _generar_lista_dca(self, estado: Dict[str, Any]) -> str:
-        precios = estado.get('precios_dca', {})
-        if not precios: return "▫️ <i>Sin compras DCA activas</i>"
-        text = ""
-        for nivel, precio in precios.items(): text += f"🔹 DCA {nivel}: ${precio:,.2f}\n"
-        return text.strip()
-
     def _crear_menu_config(self, estado: Dict[str, Any]) -> tuple:
         cfg = estado.get('config', {})
         testnet = estado.get('testnet', True)
@@ -489,9 +493,32 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
         return "⚙️ <b>CONFIGURACIÓN PROFESIONAL</b>", keyboard
 
     async def _callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Manejador central de botones."""
         query = update.callback_query
         data = query.data
         user_id = str(query.from_user.id)
+        
+        # 0. VERIFICAR SI SOMOS EL MAESTRO (Evitar bots zombie)
+        if self.persistencia:
+            id_maestro = await self.persistencia.obtener_config("master_bot_id")
+            if id_maestro and id_maestro != self._instance_id:
+                logger.debug(f"🔇 [{self._instance_id}] Ignorando click (No soy el maestro: {id_maestro})")
+                return
+
+        # 1. RESPUESTA INMEDIATA para que el botón deje de estar 'cargando'
+        try:
+            await query.answer()
+        except:
+            pass
+            
+        # 2. Protección contra flood activa
+        if time.time() < self._retry_after_edit_until:
+            try:
+                await query.answer("⚠️ Bot bloqueado temporalmente por flood (45s). Por favor espera.", show_alert=True)
+            except: pass
+            return
+            
+        logger.info(f"🖱️ [{self._instance_id}] Click: {data}")
         
         if user_id != self.admin_id:
             await query.answer("❌ No autorizado", show_alert=True)
@@ -575,10 +602,6 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
                 logger.error(f"❌ Error toggle_last_op: {e}")
             return
 
-        try:
-            await query.answer()
-        except Exception:
-            pass
         if data == "back_dashboard":
             self._menu_activo = False
             await self.forzar_refresco()
@@ -693,31 +716,46 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
             texto, keyboard = self._crear_menu_config(await self.obtener_estado())
             await self._safe_edit(query, texto, keyboard)
 
-    async def _safe_edit(self, query, texto: str, keyboard: InlineKeyboardMarkup = None) -> bool:
-        """Edita un mensaje de forma segura, manejando Flood Control."""
+    async def _safe_edit(self, query, text: str, keyboard: Optional[InlineKeyboardMarkup] = None) -> bool:
+        """Edición segura de mensajes con manejo de flood y cool-down."""
         ahora = time.time()
-        if ahora < self._retry_after_edit_until:
-            espera = int(self._retry_after_edit_until - ahora)
-            msg_espera = f"⏳ Bloqueo temporal: {espera}s"
-            try: await query.answer(msg_espera, show_alert=False)
-            except: pass
+        
+        # Protección de cool-down mínimo (5 segundos entre ediciones manuales)
+        if ahora - getattr(self, '_last_edit_time', 0) < 5:
+            # Si es muy pronto, ignoramos silenciosamente para no saturar
             return False
 
+        if ahora < self._retry_after_edit_until:
+            return False
+            
         try:
-            await query.edit_message_text(texto, reply_markup=keyboard, parse_mode='HTML')
+            await query.edit_message_text(text, reply_markup=keyboard, parse_mode="HTML")
+            self._last_edit_time = ahora
             return True
         except RetryAfter as e:
-            # CORRECCIÓN: Algunos entornos reportan segundos excesivos. 
-            # Si el bloqueo es > 5 min, lo tratamos como algo transitorio de 30s.
-            bloqueo = e.retry_after
-            if bloqueo > 300:
-                logger.warning(f"🚨 [{self._instance_id}] Flood reportado {bloqueo}s - Usando 45s de seguridad.")
-                bloqueo = 45
-            
-            self._retry_after_edit_until = time.time() + bloqueo
-            try: await query.answer(f"⚠️ Flood: Espera {int(bloqueo)}s", show_alert=True)
-            except: pass
-            return False
+            # SI FALLA EL EDIT POR FLOOD, ENVIAMOS UN NUEVO MENSAJE (Resetea el rate limit del mensaje)
+            logger.warning(f"🚨 [{self._instance_id}] Flood reportado {e.retry_after}s. Enviando MENSAJE NUEVO de emergencia...")
+            try:
+                # Marcar flood global para pausar automáticos
+                self._retry_after_edit_until = time.time() + min(e.retry_after, 45)
+                
+                new_msg = await self.app.bot.send_message(
+                    chat_id=self.admin_id,
+                    text=text,
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
+                )
+                self._msg_dashboard_id = new_msg.message_id
+                
+                # Intentar borrar el mensaje viejo para no llenar el chat
+                try: await query.delete_message()
+                except: pass
+                
+                self._last_edit_time = time.time()
+                return True
+            except Exception as e_new:
+                logger.error(f"❌ Error enviando mensaje de emergencia: {e_new}")
+                return False
         except BadRequest as e:
             if "Message is not modified" in str(e): return True
             logger.error(f"❌ [{self._instance_id}] Error BadRequest: {e}")

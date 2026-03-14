@@ -48,6 +48,7 @@ class BotTrading:
     
     def __init__(self):
         self.estado = EstadoBot()
+        self._instance_id = str(uuid.uuid4())[:8] # ID único para esta ejecución
         
         # Instanciar configuración desde las variables de config.py
         self.config = ConfiguracionTrading(
@@ -89,7 +90,7 @@ class BotTrading:
     async def inicializar(self) -> bool:
         """Inicializa todos los componentes del bot."""
         try:
-            logger.info("🚀 INICIANDO BOT DE TRADING MARTINGALA")
+            logger.info(f"🚀 INICIANDO BOT DE TRADING MARTINGALA [{getattr(self, '_instance_id', '???')}]")
             logger.info("=" * 50)
             
             # 1. Base de datos
@@ -169,7 +170,8 @@ class BotTrading:
                     self.eliminar_perfil,
                     self.resetear_estadisticas,
                     self.reset_maestro,
-                    lambda: self.exchange
+                    lambda: self.exchange,
+                    self.persistencia
                 )
                 await self.telegram.iniciar()
             
@@ -914,7 +916,8 @@ async def main():
                 bot.eliminar_perfil,
                 bot.resetear_estadisticas,
                 bot.reset_maestro,
-                lambda: bot.exchange
+                lambda: bot.exchange,
+                bot.persistencia
             )
             await bot.telegram.iniciar()
             set_telegram_app(bot.telegram.app, asyncio.get_event_loop())
@@ -951,6 +954,24 @@ async def main():
         # Loop de mantenimiento - actualizar web cada 5 segundos aunque esté pausado
         while True:
             try:
+                # 1. ACTUALIZAR HEARTBEAT para avisar que este bot es el MAESTRO
+                ts = int(time.time())
+                id_maestro = await bot.persistencia.obtener_config("master_bot_id")
+                
+                # Si no hay maestro o somos nosotros o el maestro anterior murió (>20s)
+                ts_maestro = int(await bot.persistencia.obtener_config("master_bot_ts") or 0)
+                if not id_maestro or id_maestro == bot._instance_id or (ts - ts_maestro > 20):
+                    await bot.persistencia.guardar_config("master_bot_id", bot._instance_id)
+                    await bot.persistencia.guardar_config("master_bot_ts", ts)
+                    if id_maestro != bot._instance_id:
+                        logger.info(f"👑 [{bot._instance_id}] Tomando el control como Bot Maestro.")
+                else:
+                    # No somos el maestro, dormir y no hacer nada pesado
+                    if ts % 30 == 0:
+                        logger.info(f"💤 [{bot._instance_id}] En espera (Hay otro bot maestro activo: {id_maestro})")
+                    await asyncio.sleep(5)
+                    continue
+
                 if bot and bot.exchange:
                     # Siempre verificar posición y actualizar web cada 5s
                     estado_fresco = await bot.obtener_estado()
