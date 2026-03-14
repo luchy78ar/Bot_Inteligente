@@ -668,12 +668,21 @@ class BotTrading:
         except Exception as e:
             logger.error(f"❌ Gestionar error: {e}")
 
-    async def _cerrar_con_profit(self, pnl: float) -> None:
+    async def _cerrar_con_profit(self, pnl_no_realizado: float) -> None:
         try:
+            # Obtener balance ANTES de cerrar
+            balance_antes = self.exchange.obtener_balance_fresco().get('total', 0)
+            
             posiciones = await self.persistencia.obtener_posiciones_abiertas()
             exito, _ = await self.estrategia.cerrar_posiciones(posiciones, "tp")
             if exito:
-                self.estado.pnl_realizado += pnl
+                # Obtener balance DESPUÉS de cerrar para calcular profit REAL
+                balance_despues = self.exchange.obtener_balance_fresco().get('total', 0)
+                profit_real = balance_despues - balance_antes
+                
+                logger.info(f"💰 Balance antes: {balance_antes}, Después: {balance_despues}, Profit real: {profit_real}")
+                
+                self.estado.pnl_realizado += profit_real
                 self.estado.ciclos_completados += 1
                 await self.persistencia.actualizar_estado_bot(pnl_realizado=self.estado.pnl_realizado, ciclos_completados=self.estado.ciclos_completados)
                 
@@ -697,7 +706,7 @@ class BotTrading:
                 actualizar_estado(estado_fresco)
                 if self.telegram: await self.telegram.forzar_refresco()
                 if self.estado.ciclo_actual:
-                    await self.persistencia.cerrar_ciclo(self.estado.ciclo_actual.ciclo_id, self.exchange.obtener_balance_total_usdt(), pnl)
+                    await self.persistencia.cerrar_ciclo(self.estado.ciclo_actual.ciclo_id, balance_despues, profit_real)
                     self.estado.ciclo_actual = None
                 
                 # REINICIAR: Resetear max_drawdown para el nuevo ciclo
