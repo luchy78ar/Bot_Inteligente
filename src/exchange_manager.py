@@ -496,12 +496,20 @@ class ExchangeWrapper:
                        leverage: int = 20) -> Optional[Dict[str, Any]]:
         """Abre una posición larga o corta."""
         try:
-            self.configurar_apalancamiento(symbol, leverage)
+            logger.info(f"🔔 ABRIENDO POSICIÓN: {lado} {cantidad} {symbol} con {leverage}x")
+            
+            # Normalizar símbolo
+            symbol_norm = self._normalizar_symbol(symbol)
+            logger.info(f"🔔 Símbolo normalizado: {symbol_norm}")
+            
+            self.configurar_apalancamiento(symbol_norm, leverage)
             
             lado_orden = 'buy' if lado == 'long' else 'sell'
             
+            logger.info(f"🔔 Creando orden: {lado_orden} {cantidad} {symbol_norm}")
+            
             orden = self.crear_orden(
-                symbol=symbol,
+                symbol=symbol_norm,
                 lado=lado_orden,
                 cantidad=cantidad,
                 tipo_orden='market'
@@ -514,6 +522,8 @@ class ExchangeWrapper:
             
         except Exception as e:
             logger.error(f"❌ Error abriendo posición: {e}")
+            import traceback
+            logger.error(f"❌ Trace: {traceback.format_exc()}")
             return None
     
     def cerrar_posicion(self, symbol: str, cantidad: Optional[float] = None) -> bool:

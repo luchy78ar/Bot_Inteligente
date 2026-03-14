@@ -76,27 +76,44 @@ class EstrategiaMartingala:
     
     async def calcular_tamano_posicion(self, symbol: str, balance: float, precio: float, nivel_dca: int = 0) -> float:
         try:
+            logger.info(f"🔔 calcular_tamano_posicion: balance={balance}, precio={precio}, leverage={self.config.leverage}, initial_volume_pct={self.config.initial_volume_pct}")
+            
             notional_minimo = 6.2
             volumen_usdt = (balance * self.config.initial_volume_pct) * self.config.leverage
             volumen_real = max(volumen_usdt, notional_minimo)
             
+            logger.info(f"🔔 volumen_usdt={volumen_usdt}, volumen_real={volumen_real}")
+            
             volumen_actual = volumen_real * (self.config.volume_multiplier ** nivel_dca)
             
             cantidad_maxima = self.exchange.calcular_posicion_maxima(symbol, self.config.leverage, precio)
+            logger.info(f"🔔 cantidad_maxima={cantidad_maxima}, volumen_actual={volumen_actual}")
+            
             if cantidad_maxima <= 0:
                 return 0
             
             cantidad = min(volumen_actual / precio, cantidad_maxima)
+            logger.info(f"🔔 cantidad antes de precision={cantidad}")
             return self.exchange.cantidad_a_precision(symbol, cantidad)
-        except Exception: return 0.0
+        except Exception as e:
+            logger.error(f"❌ Error calculando tamaño: {e}")
+            return 0.0
     
     async def abrir_posicion_inicial(self, symbol: str, direccion: TradeDirection, balance: float) -> Optional[Posicion]:
         try:
             precio = self.exchange.obtener_precio_actual(symbol)
+            logger.info(f"🔔 Precio actual: {precio}")
+            
             cantidad = await self.calcular_tamano_posicion(symbol, balance, precio, 0)
-            if cantidad <= 0: return None
+            logger.info(f"🔔 Cantidad calculada: {cantidad}")
+            
+            if cantidad <= 0: 
+                logger.warning(f"⚠️ Cantidad <= 0, no se puede abrir posición")
+                return None
             
             lado = 'long' if direccion == TradeDirection.LONG else 'short'
+            logger.info(f"🔔 Abriendo posición: {lado} con {cantidad}")
+            
             orden = self.exchange.abrir_posicion(symbol, lado, cantidad, self.config.leverage)
             
             if orden and 'id' in orden:
@@ -108,9 +125,12 @@ class EstrategiaMartingala:
                 await self.persistencia.guardar_posicion(posicion)
                 logger.info(f"🚀 Posición inicial abierta: {lado.upper()} {cantidad} @ {precio}")
                 return posicion
+            logger.warning(f"⚠️ No se pudo abrir posición, orden sin ID")
             return None
         except Exception as e:
             logger.error(f"❌ Error abriendo inicial: {e}")
+            import traceback
+            logger.error(f"❌ Trace: {traceback.format_exc()}")
             return None
 
     async def ejecutar_dca(self, symbol: str, posiciones: List[Posicion], balance: float) -> Optional[Posicion]:
