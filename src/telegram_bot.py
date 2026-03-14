@@ -331,6 +331,9 @@ class BotTelegram:
         size_apalancado = estado.get('inversion_apalancada', 0)
         max_dd = abs(estado.get('max_drawdown', 0))
         
+        max_ciclos_disp = cfg.get('max_ciclos', 0)
+        ciclos_fmt = f"{estado.get('ciclos_completados', 0)}/{max_ciclos_disp if max_ciclos_disp > 0 else '∞'}"
+        
         texto = f"""
 <b>🚀 NEXUS PRO SYSTEM - {symbol}</b>
 <code>{linea}</code>
@@ -339,7 +342,7 @@ class BotTelegram:
 {emoji_pnl} PNL: <b>{pnl_text}</b>
 📉 Max. Drawdown: <b>{max_dd:.2f}%</b>
 
-📐 {direccion} | ⏱️ {tiempo} | 🔄 {estado.get('ciclos_completados', 0)} ciclos
+📐 {direccion} | ⏱️ {tiempo} | 🔄 Ciclos: <b>{ciclos_fmt}</b>
 
 <b>📊 OPERATIVA</b>
 <code>{linea}</code>

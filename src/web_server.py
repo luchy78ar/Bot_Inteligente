@@ -65,6 +65,8 @@ def index():
     multiplicador = float(cfg.get('volume_multiplier', 1.5))
     tp_mode = "INTELIGENTE" if cfg.get('tp_inteligente') else "ESTÁNDAR"
     ciclos_completados = estado_bot.get('ciclos_completados', 0)
+    max_ciclos = int(cfg.get('max_ciclos', 0))
+    ciclos_fmt = f"{ciclos_completados}/{max_ciclos if max_ciclos > 0 else '∞'}"
     
     # Lógica Visual
     pnl_color = "#02c076" if pnl >= 0 else "#f84960"
@@ -297,7 +299,7 @@ def index():
                 </div>
                 <div class="stat-box">
                     <div class="stat-label">Ciclos Completos</div>
-                    <div class="stat-val">{ciclos_completados}</div>
+                    <div class="stat-val">{ciclos_fmt}</div>
                 </div>
             </div>
         </div>
