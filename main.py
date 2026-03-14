@@ -516,7 +516,7 @@ class BotTrading:
             logger.info(f"💰 Balance disponible: {balance}")
             
             analis = self.estrategia.analizar_y_decidir(self.simbolo_actual)
-            logger.info(f"📊 Resultado análisis: direccion={analis.direccion}, razon={analis.razon}, confianza={analis.confianza}")
+            logger.info(f"📊 Resultado análisis: direccion={analis.direccion}, tendencia={analis.tendencia}, confianza={analis.confianza}")
             
             if analis.direccion != TradeDirection.NEUTRAL:
                 logger.info(f"🚀 Abriendo posición en {analis.direccion}...")
