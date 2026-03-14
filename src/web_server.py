@@ -210,8 +210,9 @@ def index():
                 <div style="display: flex; gap: 20px; align-items: center;">
                     <div style="font-size: 0.85em; font-family: 'JetBrains Mono'; color: var(--text-dim);">🕐 {current_time} <span style="color:var(--neon-blue); font-size: 0.8em;">(Sync: {estado_bot.get('ultimo_sync_web', '---')})</span></div>
                     {modo_badge}
-                    <div style="font-size: 0.75em; font-weight: bold; color: {'var(--neon-green)' if running else 'var(--neon-red)'};">
-                        <span class="dot {'dot-online' if running else ''}"></span>{'MOTOR ACTIVO' if running else 'PAUSADO'}
+                    <div style="font-size: 0.75em; font-weight: bold; color: {'var(--neon-green)' if (running or (estado_bot.get('posiciones', 0) > 0)) else 'var(--neon-red)'};">
+                        <span class="dot {'dot-online' if (running or (estado_bot.get('posiciones', 0) > 0)) else ''}"></span>
+                        { 'OPERANDO' if (estado_bot.get('posiciones', 0) > 0) else ('MOTOR ACTIVO' if running else 'PAUSADO') }
                     </div>
                 </div>
             </header>
@@ -255,7 +256,7 @@ def index():
             <!-- BLOQUE 2: ESTRATEGIA -->
             <div class="card-pro">
                 <div>
-                    <div class="card-title">Motor Martingala <span style="color: {'var(--neon-green)' if running else 'var(--neon-red)'};">{'ACTIVO' if running else 'PAUSADO'}</span></div>
+                    <div class="card-title">Motor Martingala <span style="color: {'var(--neon-green)' if running else 'var(--neon-red)'};">{ 'ACTIVO' if running else 'PAUSADO' }</span></div>
                     <div class="data-row"><span>Nivel DCA</span><span class="val-mono" style="color: var(--neon-blue);">{dca_actual} / {dca_max}</span></div>
                     <div class="data-row"><span>Distancia (Step)</span><span class="val-mono">{step_pct:.2f}%</span></div>
                     <div class="data-row"><span>Mult. Step</span><span class="val-mono">{cfg.get('step_multiplier', 1.1)}x</span></div>
