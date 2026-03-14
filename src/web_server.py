@@ -307,20 +307,12 @@ def health():
 
 # Ruta de webhook para Telegram - se configura dinámicamente
 telegram_app = None
-_persistent_loop = None
-_loop_lock = threading.Lock()
+main_event_loop = None
 
-def set_telegram_app(app):
-    global telegram_app
+def set_telegram_app(app, loop=None):
+    global telegram_app, main_event_loop
     telegram_app = app
-
-def get_or_create_loop():
-    global _persistent_loop
-    with _loop_lock:
-        if _persistent_loop is None or _persistent_loop.is_closed():
-            _persistent_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(_persistent_loop)
-        return _persistent_loop
+    main_event_loop = loop or asyncio.get_event_loop()
 
 @app.route('/webhook/<token>', methods=['POST'])
 def telegram_webhook(token: str):
@@ -331,35 +323,22 @@ def telegram_webhook(token: str):
     try:
         from telegram import Update
         import json
-        import concurrent.futures
         
         update_data = request.get_data()
         update = Update.de_json(json.loads(update_data), telegram_app.bot)
         
-        def run_async():
-            loop = get_or_create_loop()
-            try:
-                loop.run_until_complete(telegram_app.process_update(update))
-            except RuntimeError as e:
-                if "Event loop is closed" in str(e):
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    global _persistent_loop
-                    _persistent_loop = loop
-                    loop.run_until_complete(telegram_app.process_update(update))
-                else:
-                    raise
-            except Exception as e:
-                logger.error(f"Process update error: {e}")
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(run_async)
+        # Ejecutar en el bucle principal de forma segura desde este hilo
+        if main_event_loop:
+            future = asyncio.run_coroutine_threadsafe(
+                telegram_app.process_update(update), 
+                main_event_loop
+            )
+            # Esperar resultado con timeout
             future.result(timeout=30)
+        else:
+            return jsonify({"error": "Main loop not found"}), 500
         
         return jsonify({"ok": True})
-    except concurrent.futures.TimeoutError:
-        logger.error("Webhook timeout")
-        return jsonify({"error": "Timeout"}), 504
     except Exception as e:
         logger.error(f"Webhook error: {e}")
         return jsonify({"error": str(e)}), 500
@@ -369,6 +348,8 @@ import threading
 def iniciar_servidor(port=8080):
     """Inicia el servidor web en un hilo separado para no bloquear."""
     def run():
+        # Desactivar el logger de Werkzeug para reducir ruido si se desea
+        # logging.getLogger('werkzeug').setLevel(logging.ERROR)
         app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False, threaded=True)
     
     t = threading.Thread(target=run, daemon=True)

@@ -633,13 +633,15 @@ class ExchangeWrapper:
             cantidad_a_cerrar = self.cantidad_a_precision(symbol_buscar, cantidad_a_cerrar)
             
             # Determinar lado de la orden (contrario a la posición)
-            lado_orden = 'sell' if pos['size'] > 0 else 'buy'
+            # Usamos el campo 'side' que ya viene normalizado como 'long' o 'short'
+            lado_actual = pos.get('side', 'long').lower()
+            lado_orden = 'sell' if lado_actual == 'long' else 'buy'
             
             params = {'reduceOnly': True}
             if self.exchange_id == 'bybit':
                 params['category'] = 'linear'
 
-            logger.info(f"🔒 Cerrando {symbol_buscar}: {lado_orden.upper()} {cantidad_a_cerrar} (Market)")
+            logger.info(f"🔒 Cerrando {symbol_buscar} ({lado_actual.upper()}): {lado_orden.upper()} {cantidad_a_cerrar} (Market)")
             
             orden = self._exchange.create_order(
                 symbol=symbol_buscar,

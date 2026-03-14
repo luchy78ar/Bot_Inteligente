@@ -171,7 +171,7 @@ class BotTrading:
             
             # 8. Servidor Web
             if self.telegram:
-                set_telegram_app(self.telegram.app)
+                set_telegram_app(self.telegram.app, asyncio.get_event_loop())
             iniciar_servidor()
             
             return True
