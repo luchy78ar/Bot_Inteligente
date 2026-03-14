@@ -112,8 +112,9 @@ class BotTelegram:
             
             self.app = Application.builder().token(self.token).build()
             
-            # Configurar webhook
-            await self.app.bot.set_webhook(webhook_url)
+            # 1. Inicializar PRIMERO la aplicación (Crucial para evitar errores en webhook)
+            await self.app.initialize()
+            await self.app.start()
             
             self.app.add_handler(CommandHandler("start", self._cmd_start))
             self.app.add_handler(CommandHandler("status", self._cmd_status))
@@ -125,12 +126,25 @@ class BotTelegram:
             # Manejador de errores global
             self.app.add_error_handler(self._error_handler)
             
-            await self.app.initialize()
-            await self.app.start()
+            # 2. Configurar webhook con reintentos para evitar el fallo 429 al arrancar
+            intentos_webhook = 3
+            while intentos_webhook > 0:
+                try:
+                    await self.app.bot.set_webhook(webhook_url)
+                    logger.info(f"✅ Webhook configurado en: {webhook_url}")
+                    break
+                except RetryAfter as e:
+                    intentos_webhook -= 1
+                    logger.warning(f"⚠️ Reintentando webhook en {e.retry_after}s...")
+                    await asyncio.sleep(e.retry_after)
+                except Exception as e:
+                    logger.error(f"❌ Error fatal en set_webhook: {e}")
+                    break
+            
+            logger.info(f"✅ Bot de Telegram [{self._instance_id}] iniciado.")
             
             self._update_task = asyncio.create_task(self._actualizar_dashboard_loop())
             
-            logger.info(f"✅ Bot de Telegram NEXUS iniciado con webhook: {webhook_url}")
         except Exception as e:
             logger.error(f"❌ Error iniciando Telegram: {e}")
 

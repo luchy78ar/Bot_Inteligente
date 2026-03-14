@@ -332,8 +332,13 @@ def set_telegram_app(app, loop=None):
 @app.route('/webhook/<token>', methods=['POST'])
 def telegram_webhook(token: str):
     """Maneja las actualizaciones de Telegram."""
+    # Verificar si la app está lista e inicializada
     if telegram_app is None:
-        return jsonify({"error": "Telegram not configured"}), 500
+        return jsonify({"error": "Telegram not configured"}), 503
+        
+    if not getattr(telegram_app, '_initialized', False):
+        logger.warning("📩 Webhook recibido pero App no inicializada aún.")
+        return jsonify({"error": "Telegram initializing"}), 503
     
     try:
         from telegram import Update
@@ -363,9 +368,15 @@ import threading
 def iniciar_servidor(port=8080):
     """Inicia el servidor web en un hilo separado para no bloquear."""
     def run():
-        # Desactivar el logger de Werkzeug para reducir ruido si se desea
-        # logging.getLogger('werkzeug').setLevel(logging.ERROR)
-        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False, threaded=True)
+        try:
+            app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False, threaded=True)
+        except Exception as e:
+            if "Address already in use" in str(e) or "8080" in str(e):
+                logger.error("🛑 PUERTO 8080 OCUPADO: Hay otra instancia del bot corriendo. Abortando esta para evitar conflictos.")
+                import os
+                os._exit(1) # Forzar el cierre de este proceso para que no haya bots duplicados
+            else:
+                logger.error(f"❌ Error en servidor web: {e}")
     
     t = threading.Thread(target=run, daemon=True)
     t.start()

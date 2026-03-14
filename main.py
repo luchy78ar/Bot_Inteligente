@@ -187,10 +187,10 @@ class BotTrading:
             actualizar_estado(estado_inicial)
             logger.info(f"💰 Estado inicial actualizado - Balance: {estado_inicial.get('balance_total', 0)}")
             
-            # 8. Servidor Web
-            if self.telegram:
-                set_telegram_app(self.telegram.app, asyncio.get_event_loop())
-            iniciar_servidor()
+            # 8. Servidor Web (Eliminado de aquí, se inicia en main)
+            # if self.telegram:
+            #     set_telegram_app(self.telegram.app, asyncio.get_event_loop())
+            # iniciar_servidor()
             
             return True
             
@@ -883,6 +883,10 @@ class BotTrading:
         if self.persistencia: await self.persistencia.cerrar()
 
 async def main():
+    # Pequeño retardo para permitir que Koyeb mate la instancia vieja y libere el puerto
+    logger.info("⏳ Esperando 5s para estabilización del puerto...")
+    await asyncio.sleep(5)
+    
     # INICIAR WEB SERVER PRIMERO para healthcheck
     iniciar_servidor()
     
