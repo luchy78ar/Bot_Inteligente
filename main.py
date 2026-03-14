@@ -576,8 +576,9 @@ class BotTrading:
     async def _buscar_nueva_oportunidad(self) -> None:
         try:
             logger.info(f"🔍 Buscando oportunidad de trading en {self.simbolo_actual}...")
-            balance = self.exchange.obtener_balance_total_usdt()
-            logger.info(f"💰 Balance disponible: {balance}")
+            # Usar balance fresco después de cerrar operación
+            balance = self.exchange.obtener_balance_fresco().get('total', 0)
+            logger.info(f"💰 Balance fresco: {balance}")
             
             analis = self.estrategia.analizar_y_decidir(self.simbolo_actual)
             logger.info(f"📊 Resultado análisis: direccion={analis.direccion}, tendencia={analis.tendencia}, confianza={analis.confianza}")

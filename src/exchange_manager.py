@@ -125,9 +125,17 @@ class ExchangeWrapper:
     
     def obtener_balance(self) -> Dict[str, float]:
         """Obtiene el balance de la cuenta con caché de 2 segundos y reintentos."""
+        return self._obtener_balance(refresh=False)
+    
+    def obtener_balance_fresco(self) -> Dict[str, float]:
+        """Obtiene el balance FORZANDO-refresco desde el exchange (sin caché)."""
+        return self._obtener_balance(refresh=True)
+    
+    def _obtener_balance(self, refresh: bool = False) -> Dict[str, float]:
+        """Obtiene el balance de la cuenta con caché de 2 segundos y reintentos."""
         try:
             ahora = time.time()
-            if ahora - self._last_balance_fetch_time < 2.0 and self._balance_cache:
+            if not refresh and ahora - self._last_balance_fetch_time < 2.0 and self._balance_cache:
                 return self._balance_cache
 
             logger.info(f"🔍 Obtener balance - API Key: {self.api_key[:10] if self.api_key else 'EMPTY'}..., testnet: {self.testnet}")
