@@ -270,8 +270,17 @@ class BotTrading:
             if not pos_exchange: num_posiciones = 0
 
             ciclo = await self.persistencia.obtener_ciclo_activo()
-            precio_entrada = info_posiciones.get("precio_entrada", 0)
+            
+            # --- MEJORA DE PRECIO PARA DASHBOARD ---
+            # Si no hay posición, el precio de la info_posiciones será 0.
+            # Debemos usar el precio fresco que ya obtuvimos arriba
             precio_actual = info_posiciones.get("precio_actual", 0)
+            if precio_actual <= 0:
+                precio_actual = self.estado.precio_actual
+                if precio_actual <= 0:
+                    precio_actual = self.exchange.obtener_precio_actual(self.simbolo_actual)
+            
+            precio_entrada = info_posiciones.get("precio_entrada", 0)
             lado = info_posiciones.get("lado", "NEUTRAL")
             
             precio_tp = 0
@@ -300,7 +309,8 @@ class BotTrading:
                 "testnet": self.estado.testnet,
                 "precio_actual": precio_actual,
                 "precio_entrada": precio_entrada,
-                "precio_inicial": info_posiciones.get("precio_inicial", precio_entrada),
+                "precio_inicial": info_posiciones.get("precio_inicial", precio_entrada) or precio_actual,
+                "ultimo_sync_web": datetime.now().strftime("%H:%M:%S"),
                 "precios_dca": info_posiciones.get("precios_dca", {}),
                 "liquidation_price": liq_price,
                 "pnl": info_posiciones.get("pnl", 0),
@@ -930,10 +940,13 @@ async def main():
         while True:
             try:
                 if bot and bot.exchange:
-                    logger.debug(f"🔄 Actualizando estado - exchange existe")
-                    # Siempre verificar posición y actualizar web
+                    # Siempre verificar posición y actualizar web cada 5s
                     estado_fresco = await bot.obtener_estado()
                     actualizar_estado(estado_fresco)
+                    if bot.estado.running:
+                        logger.debug(f"🔄 Web Sync OK (Bot Activo - {bot.simbolo_actual})")
+                    else:
+                        logger.debug(f"🔄 Web Sync OK (Bot Pausado - Esperando Telegram)")
                 else:
                     logger.debug(f"⚠️ Exchange no disponible aún")
             except Exception as e:

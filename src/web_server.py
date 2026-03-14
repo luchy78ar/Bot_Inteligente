@@ -206,7 +206,7 @@ def index():
                     <div style="font-weight: 800; font-size: 1.1em; letter-spacing: 0.5px;">NEXUS PRO <span style="color: var(--neon-blue);">TERMINAL</span></div>
                 </div>
                 <div style="display: flex; gap: 20px; align-items: center;">
-                    <div style="font-size: 0.85em; font-family: 'JetBrains Mono'; color: var(--text-dim);">🕐 {current_time}</div>
+                    <div style="font-size: 0.85em; font-family: 'JetBrains Mono'; color: var(--text-dim);">🕐 {current_time} <span style="color:var(--neon-blue); font-size: 0.8em;">(Sync: {estado_bot.get('ultimo_sync_web', '---')})</span></div>
                     {modo_badge}
                     <div style="font-size: 0.75em; font-weight: bold; color: {'var(--neon-green)' if running else 'var(--neon-red)'};">
                         <span class="dot {'dot-online' if running else ''}"></span>{'MOTOR ACTIVO' if running else 'PAUSADO'}
