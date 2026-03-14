@@ -575,7 +575,13 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
             elif m == "mult_step": kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"{x}x", callback_data=f"num_step_multiplier_{x}") for x in [1.0, 1.1, 1.2, 1.5]], [InlineKeyboardButton("✏️ Custom", callback_data="custom_step_multiplier")], [InlineKeyboardButton("⬅️ Volver", callback_data="menu_config")]])
             elif m == "trailing": kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"{x}%", callback_data=f"num_trailing_distancia_{x/100}") for x in [0.1, 0.2, 0.3, 0.5]], [InlineKeyboardButton(f"{x}%", callback_data=f"num_trailing_distancia_{x/100}") for x in [1, 1.5, 2]], [InlineKeyboardButton("✏️ Custom", callback_data="custom_trailing_distancia")], [InlineKeyboardButton("⬅️ Volver", callback_data="menu_config")]])
             elif m == "volumen": kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"{x}%", callback_data=f"num_initial_volume_pct_{x/100}") for x in [5, 10, 15, 20]], [InlineKeyboardButton(f"{x}%", callback_data=f"num_initial_volume_pct_{x/100}") for x in [25, 30, 40, 50]], [InlineKeyboardButton("✏️ Custom", callback_data="custom_initial_volume_pct")], [InlineKeyboardButton("⬅️ Volver", callback_data="menu_config")]])
-            elif m == "max_ciclos": kb = InlineKeyboardMarkup([[InlineKeyboardButton(str(x), callback_data=f"num_max_ciclos_{x}") for x in [1, 2, 3, 5]], [InlineKeyboardButton(str(x), callback_data=f"num_max_ciclos_{x}") for x in [10, 20, 50, 0]], [InlineKeyboardButton("✏️ Custom", callback_data="custom_max_ciclos")], [InlineKeyboardButton("⬅️ Volver", callback_data="menu_config")]])
+            elif m == "max_ciclos": kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("2", callback_data="num_max_ciclos_2"), InlineKeyboardButton("4", callback_data="num_max_ciclos_4"), InlineKeyboardButton("6", callback_data="num_max_ciclos_6"), InlineKeyboardButton("8", callback_data="num_max_ciclos_8")],
+                [InlineKeyboardButton("10", callback_data="num_max_ciclos_10"), InlineKeyboardButton("15", callback_data="num_max_ciclos_15"), InlineKeyboardButton("20", callback_data="num_max_ciclos_20")],
+                [InlineKeyboardButton("30", callback_data="num_max_ciclos_30"), InlineKeyboardButton("50", callback_data="num_max_ciclos_50"), InlineKeyboardButton("∞", callback_data="num_max_ciclos_0")],
+                [InlineKeyboardButton("✏️ Custom", callback_data="custom_max_ciclos")],
+                [InlineKeyboardButton("⬅️ Volver", callback_data="menu_config")]
+            ])
             else: return
             await query.edit_message_text(f"⚙️ <b>MODIFICAR {m.upper()}</b>", reply_markup=kb, parse_mode='HTML')
         elif data.startswith("num_"):
