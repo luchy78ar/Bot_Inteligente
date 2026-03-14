@@ -255,7 +255,7 @@ def index():
             <!-- BLOQUE 2: ESTRATEGIA -->
             <div class="card-pro">
                 <div>
-                    <div class="card-title">Motor Martingala <span style="color: var(--neon-yellow);">Activo</span></div>
+                    <div class="card-title">Motor Martingala <span style="color: {'var(--neon-green)' if running else 'var(--neon-red)'};">{'ACTIVO' if running else 'PAUSADO'}</span></div>
                     <div class="data-row"><span>Nivel DCA</span><span class="val-mono" style="color: var(--neon-blue);">{dca_actual} / {dca_max}</span></div>
                     <div class="data-row"><span>Distancia (Step)</span><span class="val-mono">{step_pct:.2f}%</span></div>
                     <div class="data-row"><span>Mult. Step</span><span class="val-mono">{cfg.get('step_multiplier', 1.1)}x</span></div>

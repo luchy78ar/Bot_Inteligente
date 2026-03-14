@@ -335,9 +335,11 @@ class BotTrading:
             }
             
             self._estado_cache = estado_fresco
+            # Aseguramos que el estado running nunca sea cacheado si cambió
+            self._estado_cache['running'] = self.estado.running
             self._ultimo_fetch_estado = ahora
-            actualizar_estado(estado_fresco)
-            return estado_fresco
+            actualizar_estado(self._estado_cache)
+            return self._estado_cache
         except Exception as e:
             logger.error(f"❌ Error obteniendo estado: {e}")
             return getattr(self, '_estado_cache', {"running": False, "error": str(e)})
