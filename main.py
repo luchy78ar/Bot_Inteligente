@@ -692,12 +692,6 @@ async def main():
         bot.persistencia = Persistencia(cfg.DB_PATH)
         await bot.persistencia.conectar()
         
-        # Cargar config desde DB
-        config_db = await bot.persistencia.obtener_config()
-        if config_db:
-            bot.config = config_db
-            cfg.actualizar_desde_dict(config_db)
-        
         # INICIALIZAR TELEGRAM PRIMERO (aunque exchange falle)
         if cfg.TELEGRAM_BOT_TOKEN and cfg.TELEGRAM_ADMIN_ID:
             bot.telegram = BotTelegram(
