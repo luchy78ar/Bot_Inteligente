@@ -2,8 +2,7 @@ import time
 import asyncio
 import logging
 from datetime import datetime
-from flask import Flask, jsonify, request
-import threading
+from flask import Flask, jsonify, request, make_response
 
 app = Flask(__name__)
 logger = logging.getLogger(__name__)
@@ -12,12 +11,28 @@ estado_bot = {}
 
 def actualizar_estado(nuevo_estado):
     global estado_bot
-    estado_bot.update(nuevo_estado)
+    estado_bot = nuevo_estado.copy()
+
+@app.after_request
+def add_header(response):
+    """Evitar cache del dashboard."""
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 @app.route('/', methods=['GET'])
 def index():
     """Ruta raíz con Dashboard Profesional COMPACTO en Español."""
     logger.info(f"🌐 Acceso al Dashboard desde {request.remote_addr}")
+    
+    # Forzar no cache
+    from flask import make_response
+    response = make_response(render_dashboard())
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
     
     if not estado_bot:
         return """
