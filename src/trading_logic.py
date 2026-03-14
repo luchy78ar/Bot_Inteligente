@@ -202,25 +202,29 @@ class EstrategiaMartingala:
             if roe_actual >= tp_objetivo and not self._tp_activado:
                 self._tp_activado = True
                 self._max_roi = roe_actual
-                # El piso inicial es el TP objetivo menos una pequeña holgura (0.05% de ROE)
-                self._floor_roi = max(tp_objetivo, roe_actual - 0.0005)
-                logger.info(f"🎯 ESCALERA ACTIVADA (ROE): Techo en {roe_actual*100:.2f}%, Piso en {self._floor_roi*100:.2f}%")
+                # El piso inicial es exactamente el TP objetivo para asegurar la ganancia mínima
+                self._floor_roi = tp_objetivo
+                logger.info(f"🎯 TP INTELIGENTE ACTIVADO: ROE actual {roe_actual*100:.2f}%, Objetivo {tp_objetivo*100:.2f}%")
+                logger.info(f"📈 Escalón inicial (Piso): {self._floor_roi*100:.2f}%")
             
             if self.config.tp_inteligente and self._tp_activado:
-                # Distancia de retroceso: usamos el 'Escalón' de la configuración como ROE directo
-                # Si configuraste 0.2%, el precio no puede caer más de 0.2% de ROE desde el máximo alcanzado
                 distancia = getattr(self.config, 'trailing_distancia', 0.002) 
                 
+                # Actualizar el máximo alcanzado y subir el piso
                 if roe_actual > self._max_roi:
                     self._max_roi = roe_actual
+                    # El nuevo piso es el máximo actual menos la distancia del escalón
                     nuevo_piso = roe_actual - distancia
+                    # Solo subimos el piso, nunca lo bajamos, y mantenemos el mínimo del objetivo
                     if nuevo_piso > self._floor_roi:
                         self._floor_roi = nuevo_piso
-                        logger.info(f"📈 ESCALÓN SUBE: Nuevo Piso en {self._floor_roi*100:.2f}% ROE")
+                        logger.info(f"🚀 EL PRECIO SUBE: Nuevo Techo {self._max_roi*100:.2f}%, Nuevo Piso {self._floor_roi*100:.2f}%")
                 
+                # Cierre por retroceso bajo el piso
                 if roe_actual < self._floor_roi:
-                    logger.info(f"🛑 CIERRE INTELIGENTE: ROE {roe_actual*100:.2f}% cayó bajo el piso {self._floor_roi*100:.2f}%")
+                    logger.info(f"🛑 CIERRE POR CORRECCIÓN: ROE {roe_actual*100:.2f}% cayó bajo el piso protegido {self._floor_roi*100:.2f}%")
                     return True, info.get('pnl', 0)
+                
                 return False, info.get('pnl', 0)
             
             return (roe_actual >= tp_objetivo), info.get('pnl', 0)
@@ -284,7 +288,8 @@ class EstrategiaMartingala:
             
             # 4. PROXIMIDAD DCA - Basada en el Step Dinámico desde el AVG
             mult_step = getattr(self.config, 'step_multiplier', 1.1)
-            nivel_actual = info_posiciones.get('nivel_dca', 0) if 'info_posiciones' in locals() else max(p.dca_level for p in posiciones)
+            # Obtenemos el nivel actual de la lista de posiciones
+            nivel_actual = max(p.dca_level for p in posiciones)
             
             # Si ya alcanzamos el máximo de niveles, no hay 'Próximo DCA'
             if nivel_actual >= self.config.max_dca_levels:
