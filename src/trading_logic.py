@@ -27,21 +27,30 @@ class AnalizadorTendencia:
     
     def analizar(self, symbol: str, timeframe: str = '15m', indicador: str = 'EMA') -> ResultadoAnalisis:
         try:
+            logger.info(f"📊 Analizando {symbol} en {timeframe}...")
             df = self.exchange.obtener_ohlcv(symbol, timeframe, limite=100)
             if df.empty:
-                return ResultadoAnalisis(TradeDirection.NEUTRAL, "neutral", 0, 0)
+                logger.warning(f"⚠️ Sin datos OHLCV para {symbol}")
+                return ResultadoAnalisis(TradeDirection.NEUTRAL, "sin datos", 0, 0)
             
             precio_actual = df['close'].iloc[-1]
+            logger.info(f"📈 Precio actual: {precio_actual}")
+            
             df['EMA_9'] = ta.ema(df['close'], length=9)
             df['EMA_21'] = ta.ema(df['close'], length=21)
             
             ema_9 = df['EMA_9'].iloc[-1]
             ema_21 = df['EMA_21'].iloc[-1]
             
+            logger.info(f"📉 EMA-9: {ema_9:.4f}, EMA-21: {ema_21:.4f}")
+            
             if ema_9 > ema_21:
+                logger.info(f"✅ Señal: LONG (alcista)")
                 return ResultadoAnalisis(TradeDirection.LONG, "alcista", 70, precio_actual)
             elif ema_9 < ema_21:
+                logger.info(f"✅ Señal: SHORT (bajista)")
                 return ResultadoAnalisis(TradeDirection.SHORT, "bajista", 70, precio_actual)
+            logger.info(f"⏸️ Señal: NEUTRAL")
             return ResultadoAnalisis(TradeDirection.NEUTRAL, "neutral", 50, precio_actual)
         except Exception as e:
             logger.error(f"❌ Error análisis: {e}")

@@ -511,10 +511,15 @@ class BotTrading:
 
     async def _buscar_nueva_oportunidad(self) -> None:
         try:
+            logger.info(f"🔍 Buscando oportunidad de trading en {self.simbolo_actual}...")
             balance = self.exchange.obtener_balance_total_usdt()
+            logger.info(f"💰 Balance disponible: {balance}")
+            
             analis = self.estrategia.analizar_y_decidir(self.simbolo_actual)
+            logger.info(f"📊 Resultado análisis: direccion={analis.direccion}, razon={analis.razon}, confianza={analis.confianza}")
             
             if analis.direccion != TradeDirection.NEUTRAL:
+                logger.info(f"🚀 Abriendo posición en {analis.direccion}...")
                 posicion = await self.estrategia.abrir_posicion_inicial(self.simbolo_actual, analis.direccion, balance)
                 if posicion:
                     ciclo = CicloTrading(
@@ -529,6 +534,8 @@ class BotTrading:
                     estado_fresco = await self.obtener_estado()
                     actualizar_estado(estado_fresco)
                     if self.telegram: await self.telegram.forzar_refresco()
+            else:
+                logger.info(f"⏸️ Sin señal clara, esperando siguiente ciclo...")
         except Exception as e:
             logger.error(f"❌ Buscar error: {e}")
 
