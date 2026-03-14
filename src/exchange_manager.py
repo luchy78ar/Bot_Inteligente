@@ -193,6 +193,51 @@ class ExchangeWrapper:
         balance = self.obtener_balance()
         return balance.get('free', 0)
     
+    def calcular_posicion_maxima(self, symbol: str, leverage: int, precio: float) -> float:
+        """
+        Calcula la cantidad máxima de tokens que se pueden comprar basándose en:
+        - Balance disponible
+        - Leverage
+        - Precio actual
+        - Requisitos mínimos del exchange
+        """
+        try:
+            if precio <= 0:
+                logger.warning("⚠️ Precio inválido para calcular posición máxima")
+                return 0.0
+            
+            info_symbolo = self.obtener_info_symbolo(symbol)
+            min_notional = info_symbolo['min_notional']
+            min_amount = info_symbolo['min_amount']
+            
+            balance = self.obtener_balance_disponible_usdt()
+            balance_con_leverage = balance * leverage
+            
+            cantidad_maxima = balance_con_leverage / precio
+            
+            if cantidad_maxima < min_amount:
+                logger.warning(f"⚠️ Cantidad calculada ({cantidad_maxima}) menor al mínimo ({min_amount})")
+                return 0.0
+            
+            cantidad_ajustada = self.cantidad_a_precision(symbol, cantidad_maxima)
+            
+            notional = cantidad_ajustada * precio
+            if notional < min_notional:
+                logger.warning(f"⚠️ Notional ({notional}) menor al mínimo ({min_notional})")
+                cantidad_minima = min_notional / precio
+                cantidad_minima = self.cantidad_a_precision(symbol, cantidad_minima)
+                if cantidad_minima >= min_amount:
+                    cantidad_ajustada = cantidad_minima
+                else:
+                    return 0.0
+            
+            logger.info(f"💰 Posición máxima: {cantidad_ajustada} tokens (balance: ${balance}, leverage: {leverage}x, precio: {precio})")
+            return cantidad_ajustada
+            
+        except Exception as e:
+            logger.error(f"❌ Error calculando posición máxima: {e}")
+            return 0.0
+    
     def obtener_info_symbolo(self, symbol: str) -> Dict[str, Any]:
         """Obtiene información de límites y requisitos mínimos de un símbolo."""
         try:
