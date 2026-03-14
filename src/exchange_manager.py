@@ -303,10 +303,23 @@ class ExchangeWrapper:
     def obtener_precio_actual(self, symbol: str) -> float:
         """Obtiene el precio actual (Last Price) de forma ultra-rápida."""
         try:
+            # Asegurar que el mercado esté cargado
+            if not self._exchange.markets:
+                self._exchange.load_markets()
+            
+            # Verificar si el símbolo existe
+            if symbol not in self._exchange.markets:
+                # Intentar normalizar
+                symbol_norm = symbol.replace('/USDT:USDT', '/USDT')
+                if symbol_norm in self._exchange.markets:
+                    symbol = symbol_norm
+                else:
+                    logger.warning(f"⚠️ Mercado no encontrado: {symbol}")
+            
             ticker = self._exchange.fetch_ticker(symbol)
             return float(ticker.get('last', 0))
         except Exception as e:
-            logger.error(f"❌ Error obteniendo precio: {e}")
+            logger.error(f"❌ Error obteniendo precio de {symbol}: {e}")
             return 0.0
     
     def obtener_precio_mark(self, symbol: str) -> float:

@@ -443,6 +443,14 @@ class BotTrading:
                 precio_fresco = self.exchange.obtener_precio_actual(self.simbolo_actual)
                 if precio_fresco > 0:
                     self.estado.precio_actual = precio_fresco
+                else:
+                    logger.warning(f"⚠️ Precio = 0 para {self.simbolo_actual}, intentando con simbolo normalizado")
+                    # Intentar con símbolo normalizado
+                    symbol_norm = self.simbolo_actual.replace(':USDT', '')
+                    precio_fresco = self.exchange.obtener_precio_actual(symbol_norm)
+                    if precio_fresco > 0:
+                        self.estado.precio_actual = precio_fresco
+                        logger.info(f"💹 Precio {symbol_norm}: {precio_fresco}")
                 
                 # 2. PROCESAR TRADING (CADA 5 SEGUNDOS)
                 if contador_pesado % 5 == 0:
