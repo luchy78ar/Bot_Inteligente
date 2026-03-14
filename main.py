@@ -234,6 +234,7 @@ class BotTrading:
             
             # --- LÓGICA DE SINCRONIZACIÓN PRIORITARIA ---
             if pos_exchange:
+                logger.info(f"🔍 SYNC: Posición detectada en exchange: {pos_exchange}")
                 # Si hay posición en el exchange, ella manda sobre la DB
                 if not posiciones_db:
                     logger.info(f"🔍 SYNC: Detectada posición externa. Importando...")
@@ -251,7 +252,10 @@ class BotTrading:
                     info_posiciones = await self.estrategia.obtener_info_posiciones([pos_db])
                 else:
                     # Usar la lógica de la estrategia para calcular métricas reales
+                    logger.info(f"🔍 SYNC: Posición ya en DB: {posiciones_db}")
                     info_posiciones = await self.estrategia.obtener_info_posiciones(posiciones_db)
+            else:
+                logger.info(f"🔍 SYNC: No hay posición en exchange")
             
             if not pos_exchange and posiciones_db:
                 logger.warning(f"🔍 SYNC: Limpiando posiciones fantasma de la DB")
@@ -474,10 +478,25 @@ class BotTrading:
         pos_existente = self.exchange.obtener_posicion(self.simbolo_actual) if self.exchange else None
         posiciones_db = await self.persistencia.obtener_posiciones_abiertas() if self.persistencia else []
         
-        if pos_existente or posiciones_db:
-            logger.warning(f"⚠️ Ya hay posición abierta. No se puede iniciar until it's closed.")
+        logger.info(f"🔍 INICIAR: pos_existente={pos_existente}, posiciones_db={posiciones_db}")
+        
+        if pos_existente:
+            logger.warning(f"⚠️ Ya hay posición abierta en exchange: {pos_existente}")
             if self.telegram:
-                await self.telegram.notificar("⚠️ Ya hay una posición abierta. Cierra la posición primero antes de iniciar.")
+                await self.telegram.notificar("⚠️ Ya hay una posición abierta en el exchange. Cierra la posición primero antes de iniciar.")
+            # Actualizar estado para mostrar la posición
+            estado_fresco = await self.obtener_estado()
+            actualizar_estado(estado_fresco)
+            if self.telegram: await self.telegram.forzar_refresco()
+            return
+        
+        if posiciones_db:
+            logger.warning(f"⚠️ Ya hay posiciones en DB: {posiciones_db}")
+            if self.telegram:
+                await self.telegram.notificar("⚠️ Ya hay posiciones guardadas en la base de datos.")
+            estado_fresco = await self.obtener_estado()
+            actualizar_estado(estado_fresco)
+            if self.telegram: await self.telegram.forzar_refresco()
             return
         
         self.estado.running = True
