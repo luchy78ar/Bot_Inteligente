@@ -294,10 +294,20 @@ def health():
 
 # Ruta de webhook para Telegram - se configura dinámicamente
 telegram_app = None
+_persistent_loop = None
+_loop_lock = threading.Lock()
 
 def set_telegram_app(app):
     global telegram_app
     telegram_app = app
+
+def get_or_create_loop():
+    global _persistent_loop
+    with _loop_lock:
+        if _persistent_loop is None or _persistent_loop.is_closed():
+            _persistent_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(_persistent_loop)
+        return _persistent_loop
 
 @app.route('/webhook/<token>', methods=['POST'])
 def telegram_webhook(token: str):
@@ -314,18 +324,29 @@ def telegram_webhook(token: str):
         update = Update.de_json(json.loads(update_data), telegram_app.bot)
         
         def run_async():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            loop = get_or_create_loop()
             try:
                 loop.run_until_complete(telegram_app.process_update(update))
-            finally:
-                loop.close()
+            except RuntimeError as e:
+                if "Event loop is closed" in str(e):
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    global _persistent_loop
+                    _persistent_loop = loop
+                    loop.run_until_complete(telegram_app.process_update(update))
+                else:
+                    raise
+            except Exception as e:
+                logger.error(f"Process update error: {e}")
         
-        with concurrent.futures.ThreadPoolExecutor() as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(run_async)
-            future.result()
+            future.result(timeout=30)
         
         return jsonify({"ok": True})
+    except concurrent.futures.TimeoutError:
+        logger.error("Webhook timeout")
+        return jsonify({"error": "Timeout"}), 504
     except Exception as e:
         logger.error(f"Webhook error: {e}")
         return jsonify({"error": str(e)}), 500

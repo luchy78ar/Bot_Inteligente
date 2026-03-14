@@ -426,13 +426,19 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
                 nuevo = not st.get('parar_tras_tp', False)
                 await self.cambiar_config('parar_tras_tp', nuevo)
                 msg = "🛑 Parada automática tras TP: ACTIVADO" if nuevo else "🔄 Modo Infinito: ACTIVADO"
-                await query.answer(msg, show_alert=True)
+                try:
+                    await query.answer(msg, show_alert=True)
+                except Exception:
+                    pass
                 await self.forzar_refresco()
             except Exception as e:
                 logger.error(f"❌ Error toggle_last_op: {e}")
             return
 
-        await query.answer()
+        try:
+            await query.answer()
+        except Exception:
+            pass
         if data == "back_dashboard":
             self._menu_activo = False
             await self.forzar_refresco()
