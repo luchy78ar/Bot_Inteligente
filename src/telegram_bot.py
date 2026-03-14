@@ -93,6 +93,8 @@ class BotTelegram:
         self._transicion_en_curso: bool = False
         self._custom_param: Optional[str] = None
         self._ultimo_estado: Dict[str, Any] = {}
+        self._last_refresh_text: str = ""
+        self._refresh_lock = asyncio.Lock()
 
     async def iniciar(self) -> None:
         try:
@@ -125,55 +127,65 @@ class BotTelegram:
     async def forzar_refresco(self, estado_externo: Optional[Dict[str, Any]] = None) -> None:
         """Actualiza el dashboard usando un estado proporcionado o consultando el actual."""
         if not self._chat_id: return
+        if self._refresh_lock.locked(): return # Evitar acumulación de peticiones
             
-        try:
-            if estado_externo:
-                estado = estado_externo
-                self._ultimo_estado = estado
-            else:
-                try:
-                    estado = await asyncio.wait_for(self.obtener_estado(), timeout=2.0)
+        async with self._refresh_lock:
+            try:
+                if estado_externo:
+                    estado = estado_externo
                     self._ultimo_estado = estado
-                except:
-                    if not self._ultimo_estado: return
-                    estado = self._ultimo_estado
-            
-            if estado.get('posiciones', 0) > 0 or estado.get('running', False):
-                texto, kb = self._crear_panel_operacion(estado)
-            else:
-                texto, kb = self._crear_dashboard(estado)
+                else:
+                    try:
+                        estado = await asyncio.wait_for(self.obtener_estado(), timeout=2.0)
+                        self._ultimo_estado = estado
+                    except:
+                        if not self._ultimo_estado: return
+                        estado = self._ultimo_estado
                 
-            mensaje_editado = False
-            if self._msg_dashboard_id:
-                try:
-                    await self.app.bot.edit_message_text(
-                        chat_id=self._chat_id, message_id=self._msg_dashboard_id,
-                        text=texto, reply_markup=kb, parse_mode='HTML'
-                    )
-                    mensaje_editado = True
-                except Exception as e:
-                    error_str = str(e)
-                    if "Message is not modified" in error_str:
-                        await self.app.bot.edit_message_reply_markup(
+                if self._menu_activo: return # No refrescar si el usuario está configurando
+                
+                if estado.get('posiciones', 0) > 0 or estado.get('running', False):
+                    texto, kb = self._crear_panel_operacion(estado)
+                else:
+                    texto, kb = self._crear_dashboard(estado)
+                
+                # OPTIMIZACIÓN: Solo editar si el texto ha cambiado
+                if texto == self._last_refresh_text and self._msg_dashboard_id:
+                    return
+                
+                self._last_refresh_text = texto
+                
+                mensaje_editado = False
+                if self._msg_dashboard_id:
+                    try:
+                        await self.app.bot.edit_message_text(
                             chat_id=self._chat_id, message_id=self._msg_dashboard_id,
-                            reply_markup=kb
+                            text=texto, reply_markup=kb, parse_mode='HTML'
                         )
                         mensaje_editado = True
-                    elif "message to edit not found" in error_str or "MESSAGE_ID_INVALID" in error_str or "Bad Request" in error_str:
-                        self._msg_dashboard_id = None
-                    else:
-                        logger.debug(f"ℹ️ Edit attempt: {error_str}")
-            
-            if not mensaje_editado and self._msg_dashboard_id is None:
-                try:
-                    msg = await self.app.bot.send_message(
-                        chat_id=self._chat_id, text=texto, reply_markup=kb, parse_mode='HTML'
-                    )
-                    self._msg_dashboard_id = msg.message_id
-                except Exception as e:
-                    logger.debug(f"ℹ️ Send attempt: {e}")
-        except Exception as e:
-            logger.debug(f"ℹ️ Refresh info: {e}")
+                    except Exception as e_edit:
+                        error_str = str(e_edit)
+                        if "Message is not modified" in error_str:
+                            await self.app.bot.edit_message_reply_markup(
+                                chat_id=self._chat_id, message_id=self._msg_dashboard_id,
+                                reply_markup=kb
+                            )
+                            mensaje_editado = True
+                        elif "message to edit not found" in error_str or "MESSAGE_ID_INVALID" in error_str or "Bad Request" in error_str:
+                            self._msg_dashboard_id = None
+                        else:
+                            logger.debug(f"ℹ️ Edit attempt: {error_str}")
+                
+                if not mensaje_editado and self._msg_dashboard_id is None:
+                    try:
+                        msg = await self.app.bot.send_message(
+                            chat_id=self._chat_id, text=texto, reply_markup=kb, parse_mode='HTML'
+                        )
+                        self._msg_dashboard_id = msg.message_id
+                    except Exception as e_send:
+                        logger.debug(f"ℹ️ Send attempt: {e_send}")
+            except Exception as e:
+                logger.debug(f"ℹ️ Refresh info: {e}")
 
     async def notificar(self, mensaje: str) -> None:
         """Envía un mensaje directo al administrador."""
@@ -187,12 +199,12 @@ class BotTelegram:
         _ultima_actualizacion = 0
         while True:
             try:
-                await asyncio.sleep(10) # Reducido a 10s para evitar rate limits
+                await asyncio.sleep(15) # Aumentar a 15s para seguridad extrema
                 if not self._msg_dashboard_id or self._menu_activo or self._transicion_en_curso:
                     continue
-                # Solo actualizar cada 10 segundos como máximo
+                # Solo actualizar cada 15 segundos como máximo
                 ahora = datetime.now().timestamp()
-                if ahora - _ultima_actualizacion >= 10:
+                if ahora - _ultima_actualizacion >= 15:
                     await self.forzar_refresco()
                     _ultima_actualizacion = ahora
             except asyncio.CancelledError: break
