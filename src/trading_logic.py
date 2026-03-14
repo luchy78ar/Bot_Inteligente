@@ -27,6 +27,7 @@ class AnalizadorTendencia:
     
     def analizar(self, symbol: str, timeframe: str = '15m', indicador: str = 'EMA') -> ResultadoAnalisis:
         try:
+            import config as cfg
             logger.info(f"📊 Analizando {symbol} en {timeframe}...")
             df = self.exchange.obtener_ohlcv(symbol, timeframe, limite=100)
             if df.empty:
@@ -36,18 +37,21 @@ class AnalizadorTendencia:
             precio_actual = df['close'].iloc[-1]
             logger.info(f"📈 Precio actual: {precio_actual}")
             
-            df['EMA_9'] = ta.ema(df['close'], length=9)
-            df['EMA_21'] = ta.ema(df['close'], length=21)
+            ema_fast_len = getattr(cfg, 'EMA_FAST', 9)
+            ema_slow_len = getattr(cfg, 'EMA_SLOW', 21)
             
-            ema_9 = df['EMA_9'].iloc[-1]
-            ema_21 = df['EMA_21'].iloc[-1]
+            df['EMA_FAST'] = ta.ema(df['close'], length=ema_fast_len)
+            df['EMA_SLOW'] = ta.ema(df['close'], length=ema_slow_len)
             
-            logger.info(f"📉 EMA-9: {ema_9:.4f}, EMA-21: {ema_21:.4f}")
+            ema_fast = df['EMA_FAST'].iloc[-1]
+            ema_slow = df['EMA_SLOW'].iloc[-1]
             
-            if ema_9 > ema_21:
+            logger.info(f"📉 EMA-{ema_fast_len}: {ema_fast:.4f}, EMA-{ema_slow_len}: {ema_slow:.4f}")
+            
+            if ema_fast > ema_slow:
                 logger.info(f"✅ Señal: LONG (alcista)")
                 return ResultadoAnalisis(TradeDirection.LONG, "alcista", 70, precio_actual)
-            elif ema_9 < ema_21:
+            elif ema_fast < ema_slow:
                 logger.info(f"✅ Señal: SHORT (bajista)")
                 return ResultadoAnalisis(TradeDirection.SHORT, "bajista", 70, precio_actual)
             logger.info(f"⏸️ Señal: NEUTRAL")
@@ -216,49 +220,45 @@ class EstrategiaMartingala:
             if not posiciones: return False, 0
             info = await self.obtener_info_posiciones(posiciones)
             
-            # ROI REAL (ROE%) - Beneficio sobre Margen Real
-            roe_actual = info.get('pnl_pct', 0) / 100
+            # USO DE PNL VISUAL (Relativo al Capital Total del usuario)
+            pnl_visual = info.get('pnl_pct', 0) / 100
             tp_objetivo = self.config.take_profit_pct
             
-            if roe_actual >= tp_objetivo and not self._tp_activado:
+            if pnl_visual >= tp_objetivo and not self._tp_activado:
                 self._tp_activado = True
-                self._max_roi = roe_actual
-                # El piso inicial es exactamente el TP objetivo para asegurar la ganancia mínima
-                self._floor_roi = tp_objetivo
-                logger.info(f"🎯 TP INTELIGENTE ACTIVADO: ROE actual {roe_actual*100:.2f}%, Objetivo {tp_objetivo*100:.2f}%")
-                logger.info(f"📈 Escalón inicial (Piso): {self._floor_roi*100:.2f}%")
+                self._max_pnl_visual = pnl_visual
+                self._floor_pnl_visual = tp_objetivo
+                logger.info(f"🎯 TP ACTIVADO: Ganancia Real {pnl_visual*100:.2f}% de tu capital. Objetivo {tp_objetivo*100:.2f}%")
             
             if self.config.tp_inteligente and self._tp_activado:
-                distancia = getattr(self.config, 'trailing_distancia', 0.002) 
+                distancia_visual = getattr(self.config, 'trailing_distancia', 0.002) 
                 
-                # Actualizar el máximo alcanzado y subir el piso
-                if roe_actual > self._max_roi:
-                    self._max_roi = roe_actual
-                    # El nuevo piso es el máximo actual menos la distancia del escalón
-                    nuevo_piso = roe_actual - distancia
-                    # Solo subimos el piso, nunca lo bajamos, y mantenemos el mínimo del objetivo
-                    if nuevo_piso > self._floor_roi:
-                        self._floor_roi = nuevo_piso
-                        logger.info(f"🚀 EL PRECIO SUBE: Nuevo Techo {self._max_roi*100:.2f}%, Nuevo Piso {self._floor_roi*100:.2f}%")
+                if pnl_visual > self._max_pnl_visual:
+                    self._max_pnl_visual = pnl_visual
+                    nuevo_piso = pnl_visual - distancia_visual
+                    if nuevo_piso > self._floor_pnl_visual:
+                        self._floor_pnl_visual = nuevo_piso
+                        logger.info(f"🚀 SUBIENDO: Beneficio {self._max_pnl_visual*100:.2f}%, Piso Protegido {self._floor_pnl_visual*100:.2f}%")
                 
-                # Cierre por retroceso bajo el piso
-                if roe_actual < self._floor_roi:
-                    logger.info(f"🛑 CIERRE POR CORRECCIÓN: ROE {roe_actual*100:.2f}% cayó bajo el piso protegido {self._floor_roi*100:.2f}%")
+                if pnl_visual < self._floor_pnl_visual:
+                    logger.info(f"🛑 CIERRE: El beneficio cayó a {pnl_visual*100:.2f}% (Bajo el piso de {self._floor_pnl_visual*100:.2f}%)")
                     return True, info.get('pnl', 0)
                 
                 return False, info.get('pnl', 0)
             
-            return (roe_actual >= tp_objetivo), info.get('pnl', 0)
-        except Exception: return False, 0
+            return (pnl_visual >= tp_objetivo), info.get('pnl', 0)
+        except Exception as e:
+            logger.error(f"❌ Error verificando TP: {e}")
+            return False, 0
 
     async def verificar_stop_loss(self, posiciones: List[Posicion]) -> Tuple[bool, float]:
         if not posiciones or self.config.stop_loss_pct <= 0: return False, 0
         info = await self.obtener_info_posiciones(posiciones)
         
-        # El Stop Loss también se basa en ROE% (Pérdida sobre margen real)
-        roe_actual = info.get('pnl_pct', 0) / 100
+        # SL basado en el Capital Total
+        pnl_visual = info.get('pnl_pct', 0) / 100
         
-        if roe_actual <= -self.config.stop_loss_pct:
+        if pnl_visual <= -self.config.stop_loss_pct:
             return True, info.get('pnl', 0)
         return False, 0
 
@@ -295,17 +295,16 @@ class EstrategiaMartingala:
             else:
                 variacion_precio = (avg_entry - precio_actual) / avg_entry if avg_entry > 0 else 0
 
-            # 3. MÉTRICAS DE CAPITAL REALES (ROE%)
+            # 3. MÉTRICAS DE CAPITAL REALES (VISIBILIDAD PARA EL USUARIO)
             pnl = float(pos_info.get('unrealized_pnl', 0))
-            # Usar el margen real que el exchange reporta para la posición
-            capital_real = float(pos_info.get('margin', 0))
             
-            # Si el exchange no reporta margen (raro), usar cálculo teórico como respaldo
-            if capital_real <= 0:
-                capital_real = total_cost / posiciones[0].leverage
+            # Obtener el capital base que el usuario realmente tiene destinado a este bot
+            # Usamos self.config.capital_base si estuviera definido, o el balance disponible como aproximación
+            balance_fresco = self.exchange.obtener_balance_fresco().get('total', 0)
             
-            # ROE (Return on Equity) - Basado en capital REAL bloqueado
-            roe_pct = (pnl / capital_real * 100) if capital_real > 0 else 0
+            # El PNL% que el usuario quiere ver es: (Ganancia $ / Capital Total) * 100
+            # Si el usuario tiene $18 y gana $0.18, quiere ver 1%
+            pnl_visual_pct = (pnl / balance_fresco * 100) if balance_fresco > 0 else 0
             
             # 4. PROXIMIDAD DCA - Basada en el Step Dinámico desde el AVG
             mult_step = getattr(self.config, 'step_multiplier', 1.1)
@@ -338,8 +337,8 @@ class EstrategiaMartingala:
                 'precios_dca': precios_dca,
                 'lado': lado,
                 'pnl': pnl,
-                'pnl_pct': roe_pct, # Ahora pasamos ROE como el PNL% principal
-                'capital_invertido': capital_real,
+                'pnl_pct': pnl_visual_pct, # PNL real sobre capital total
+                'capital_invertido': balance_fresco, 
                 'inversion_apalancada': total_qty * precio_actual,
                 'nivel_dca': max(p.dca_level for p in posiciones),
                 'proximidad_dca': max(0, proximidad_dca),

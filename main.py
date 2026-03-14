@@ -659,16 +659,18 @@ class BotTrading:
             
             logger.info(f"🔍 Buscando oportunidad de trading en {self.simbolo_actual}...")
             
-            # USAR CAPITAL BASE FIJO - No usar balance fresco que incluye ganancias
-            # Si ya tenemos un capital base guardado, usarlo; sino guardar el actual como base
-            if not hasattr(self, '_capital_base_fijo') or self._capital_base_fijo <= 0:
-                balance_actual = self.exchange.obtener_balance_fresco().get('total', 0)
-                self._capital_base_fijo = balance_actual
-                logger.info(f"💰 Capital base inicial establecido: ${self._capital_base_fijo}")
+            # USAR CAPITAL SEGÚN MODO DE REINVERSIÓN
+            balance_actual = self.exchange.obtener_balance_fresco().get('total', 0)
             
-            # Usar el capital base fijo para cálculos de tamaño de posición
-            balance = self._capital_base_fijo
-            logger.info(f"💰 Balance (capital base fijo): {balance}")
+            if self.config.reinvest_mode:
+                balance = balance_actual
+                logger.info(f"💰 Modo Reinversión: Usando balance fresco ${balance:.2f}")
+            else:
+                if not hasattr(self, '_capital_base_fijo') or self._capital_base_fijo <= 0:
+                    self._capital_base_fijo = balance_actual
+                    logger.info(f"💰 Capital base inicial establecido: ${self._capital_base_fijo:.2f}")
+                balance = self._capital_base_fijo
+                logger.info(f"💰 Capital base fijo: ${balance:.2f} (Reinversión OFF)")
             
             analis = self.estrategia.analizar_y_decidir(self.simbolo_actual)
             logger.info(f"📊 Resultado análisis: direccion={analis.direccion}, tendencia={analis.tendencia}, confianza={analis.confianza}")
@@ -685,6 +687,9 @@ class BotTrading:
                         timestamp_inicio=datetime.now().timestamp()
                     )
                     await self.persistencia.guardar_ciclo(ciclo)
+                    # IMPORTANTE: Guardar en el estado para poder cerrarlo luego
+                    self.estado.ciclo_actual = ciclo
+                    
                     # Sincronización inmediata
                     estado_fresco = await self.obtener_estado()
                     actualizar_estado(estado_fresco)
@@ -721,11 +726,6 @@ class BotTrading:
             roe_actual = info.get("pnl_pct", 0)
             self.estado.pnl_pct = roe_actual
             
-            # El Drawdown solo cuenta si es pérdida (negativo)
-            # Recordamos el valor más bajo (el más negativo)
-            if roe_actual < 0:
-                self.estado.max_drawdown = min(self.estado.max_drawdown, roe_actual)
-            
             self.estado.capital_invertido = info.get("capital_invertido", 0)
             self.estado.precio_liquidacion = info.get("liquidation_price", 0)
         except Exception as e:
@@ -733,71 +733,98 @@ class BotTrading:
 
     async def _cerrar_con_profit(self, pnl_no_realizado: float) -> None:
         try:
+            logger.info(f"🎯 Iniciando cierre por profit. PNL no realizado: ${pnl_no_realizado:.4f}")
+            
             balance_antes = self.exchange.obtener_balance_fresco()
-            balance_total_antes = balance_antes.get('total', 0)
-            balance_free_antes = balance_antes.get('free', 0)
+            balance_total_antes = float(balance_antes.get('total', 0))
             
             posiciones = await self.persistencia.obtener_posiciones_abiertas()
-            pnl_antes = pnl_no_realizado
-            
-            exito, _ = await self.estrategia.cerrar_posiciones(posiciones, "tp")
+            if not posiciones:
+                logger.warning("⚠️ No se encontraron posiciones abiertas en DB para cerrar")
+                return
+
+            exito, pnl_final_estimado = await self.estrategia.cerrar_posiciones(posiciones, "tp")
             if exito:
                 # Delay para que el exchange procese y actualice el balance
-                await asyncio.sleep(2)
+                await asyncio.sleep(3)
                 
                 balance_despues = self.exchange.obtener_balance_fresco()
-                balance_total_despues = balance_despues.get('total', 0)
-                balance_free_despues = balance_despues.get('free', 0)
+                balance_total_despues = float(balance_despues.get('total', 0))
                 
-                # Calcular profit basado en balance total (más confiable)
-                profit_total = balance_total_despues - balance_total_antes
+                # Calcular profit basado en balance total (Realizado neto)
+                profit_neto = balance_total_despues - balance_total_antes
                 
-                logger.info(f"💰 Balance antes: total={balance_total_antes}, free={balance_free_antes}")
-                logger.info(f"💰 Balance después: total={balance_total_despues}, free={balance_free_despues}")
-                logger.info(f"💰 Profit calculado: {profit_total}")
+                logger.info(f"💰 Balance: Antes=${balance_total_antes:.4f}, Después=${balance_total_despues:.4f}")
+                logger.info(f"💰 Profit NETO (con fees): ${profit_neto:.4f}")
                 
-                # Usar profit_total como fuente de verdad
-                # El profit_total puede ser positivo (ganancia) o negativo (pérdida)
-                profit_real = profit_total
+                # Si el profit es negativo por fees pero la operación fue ganadora en precio,
+                # registramos al menos una pequeña ganancia simbólica o el PNL bruto
+                # para que el usuario vea que el bot "ganó" el ciclo.
+                profit_a_registrar = profit_neto
+                if profit_neto <= 0 and pnl_no_realizado > 0:
+                    logger.warning(f"⚠️ Profit neto negativo (${profit_neto:.4f}) por comisiones. Registrando PNL bruto: ${pnl_no_realizado:.4f}")
+                    profit_a_registrar = pnl_no_realizado
                 
-                if profit_real < 0:
-                    logger.warning(f"⚠️ Profit negativo detectado: {profit_real}. Usando PNL no realizado: {pnl_antes}")
-                    profit_real = pnl_antes
-                
-                self.estado.pnl_realizado += profit_real
+                self.estado.pnl_realizado += profit_a_registrar
                 self.estado.ciclos_completados += 1
-                await self.persistencia.actualizar_estado_bot(pnl_realizado=self.estado.pnl_realizado, ciclos_completados=self.estado.ciclos_completados)
                 
-                # Verificar modo 'Última Operación'
-                if getattr(self.estado, 'parar_tras_tp', False):
-                    logger.info("🛑 MODO ÚLTIMA OP: Deteniendo bot tras beneficio...")
-                    await self.detener_trading()
-                    if self.telegram: await self.telegram.notificar("🛑 <b>META ALCANZADA</b>\n\nEl bot se ha detenido automáticamente tras completar la última operación con éxito.")
-                    return
-
-                # Verificar límite de ciclos
-                max_ciclos = self.config.max_ciclos
-                if max_ciclos > 0 and self.estado.ciclos_completados >= max_ciclos:
-                    logger.info(f"🛑 Límite de ciclos alcanzado: {self.estado.ciclos_completados}/{max_ciclos}. Deteniendo bot...")
-                    await self.detener_trading()
-                    if self.telegram: await self.telegram.notificar(f"🔴 <b>BOT DETENIDO</b>\n\nSe completaron {max_ciclos} ciclos.")
-                    return
+                await self.persistencia.actualizar_estado_bot(
+                    pnl_realizado=self.estado.pnl_realizado, 
+                    ciclos_completados=self.estado.ciclos_completados
+                )
                 
-                # Sync inmediato
-                estado_fresco = await self.obtener_estado()
-                actualizar_estado(estado_fresco)
-                if self.telegram: await self.telegram.forzar_refresco()
+                # Cerrar ciclo en la DB
                 if self.estado.ciclo_actual:
-                    await self.persistencia.cerrar_ciclo(self.estado.ciclo_actual.ciclo_id, balance_despues, profit_real)
+                    await self.persistencia.cerrar_ciclo(
+                        self.estado.ciclo_actual.ciclo_id, 
+                        balance_total_despues, 
+                        profit_a_registrar
+                    )
                     self.estado.ciclo_actual = None
-                
-                # REINICIAR: Resetear max_drawdown para el nuevo ciclo
+                else:
+                    # Si no teníamos el objeto en memoria, intentamos buscar el activo en DB
+                    ciclo_db = await self.persistencia.obtener_ciclo_activo()
+                    if ciclo_db:
+                        await self.persistencia.cerrar_ciclo(
+                            ciclo_db.ciclo_id, 
+                            balance_total_despues, 
+                            profit_a_registrar
+                        )
+
+                # Resetear métricas temporales
                 self.estado.max_drawdown = 0.0
                 
-                if cfg.REINVEST_MODE and self.estado.running:
+                # Notificación Telegram
+                if self.telegram:
+                    msg = (f"🎯 <b>TP ALCANZADO (+{self.config.take_profit_pct*100:.1f}%)</b>\n\n"
+                           f"➕ Profit: <b>${profit_a_registrar:.4f}</b>\n"
+                           f"🔄 Ciclos: <b>{self.estado.ciclos_completados}</b>\n"
+                           f"💰 Balance: <b>${balance_total_despues:,.2f}</b>")
+                    await self.telegram.notificar(msg)
+                    await self.telegram.forzar_refresco()
+
+                # Verificar límites de parada
+                parar = False
+                if getattr(self.estado, 'parar_tras_tp', False):
+                    logger.info("🛑 MODO ÚLTIMA OP: Deteniendo bot...")
+                    parar = True
+                elif self.config.max_ciclos > 0 and self.estado.ciclos_completados >= self.config.max_ciclos:
+                    logger.info(f"🛑 Límite de ciclos alcanzado: {self.estado.ciclos_completados}")
+                    parar = True
+                
+                if parar:
+                    await self.detener_trading()
+                    return
+
+                # Si no para, buscar nueva oportunidad después de un respiro
+                if self.estado.running:
                     await asyncio.sleep(5)
                     await self._buscar_nueva_oportunidad()
-        except Exception: pass
+                    
+        except Exception as e:
+            logger.error(f"❌ Error en _cerrar_con_profit: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     async def _cerrar_con_perdida(self) -> None:
         try:

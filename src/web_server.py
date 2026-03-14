@@ -72,13 +72,12 @@ def index():
     lado_text = "COMPRA (LONG)" if lado == "LONG" else "VENTA (SHORT)" if lado == "SHORT" else "NEUTRAL"
     lado_color = "#02c076" if lado == "LONG" else "#f84960" if lado == "SHORT" else "#848e9c"
     
-    # Cálculos de progreso
-    tp_objetivo = cfg.get('take_profit_pct', 0.01) * 100  # Convertir a porcentaje para display
-    tp_objetivo_decimal = cfg.get('take_profit_pct', 0.01)  # Keep decimal for calculation
-    # pnl_pct ya es ROE% (ej: 1.5 para 1.5%)
-    progreso_tp = min(100, (pnl_pct / tp_objetivo_decimal * 100)) if (tp_objetivo_decimal > 0 and pnl_pct > 0) else 0
+    # Cálculos de progreso al Objetivo (TP)
+    tp_objetivo_pct = cfg.get('take_profit_pct', 0.01) * 100
+    # pnl_pct ya viene como el PNL visual (ej: 1.5 para 1.5% del capital total)
+    progreso_tp = min(100, (pnl_pct / tp_objetivo_pct * 100)) if (tp_objetivo_pct > 0 and pnl_pct > 0) else 0
     
-    dist_total_liq = abs(liq - entrada_breakeven)
+    dist_total_liq = abs(liq - entrada_breakeven) if liq > 0 else 0
     dist_actual_liq = abs(precio - entrada_breakeven)
     en_perdida = (lado == "LONG" and precio < entrada_breakeven) or (lado == "SHORT" and precio > entrada_breakeven)
     riesgo_liq = min(100, (dist_actual_liq / dist_total_liq * 100)) if (dist_total_liq > 0 and en_perdida) else 0

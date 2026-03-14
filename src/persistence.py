@@ -134,15 +134,16 @@ class Persistencia:
         
         # Agregar columnas si no existen (para bases de datos antiguas)
         try:
-            await self._db.execute("ALTER TABLE estado_bot ADD COLUMN testnet INTEGER DEFAULT 1")
+            async with self._db.execute("PRAGMA table_info(estado_bot)") as cursor:
+                columns = [row['name'] for row in await cursor.fetchall()]
+                if 'testnet' not in columns:
+                    await self._db.execute("ALTER TABLE estado_bot ADD COLUMN testnet INTEGER DEFAULT 1")
+                if 'symbol' not in columns:
+                    await self._db.execute("ALTER TABLE estado_bot ADD COLUMN symbol TEXT DEFAULT 'BTC/USDT:USDT'")
             await self._db.commit()
-        except:
-            pass
-        try:
-            await self._db.execute("ALTER TABLE estado_bot ADD COLUMN symbol TEXT DEFAULT 'BTC/USDT:USDT'")
-            await self._db.commit()
-        except:
-            pass
+            logger.info("✅ Columnas adicionales verificadas/agregadas")
+        except Exception as e:
+            logger.warning(f"⚠️ Nota: Error verificando columnas extras (posiblemente ya existen): {e}")
             
         logger.info("📊 Tablas de SQLite creadas/verificadas")
     
