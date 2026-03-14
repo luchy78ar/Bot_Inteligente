@@ -124,14 +124,28 @@ class ExchangeWrapper:
             return False
     
     def obtener_balance(self) -> Dict[str, float]:
-        """Obtiene el balance de la cuenta con caché de 2 segundos."""
+        """Obtiene el balance de la cuenta con caché de 2 segundos y reintentos."""
         try:
             ahora = time.time()
             if ahora - self._last_balance_fetch_time < 2.0 and self._balance_cache:
                 return self._balance_cache
 
             logger.info(f"🔍 Obtener balance - API Key: {self.api_key[:10] if self.api_key else 'EMPTY'}..., testnet: {self.testnet}")
-            balance = self._exchange.fetch_balance()
+            
+            # Reintentos para errores temporales de Bybit
+            max_intentos = 3
+            for intento in range(max_intentos):
+                try:
+                    balance = self._exchange.fetch_balance()
+                    break
+                except Exception as api_err:
+                    error_str = str(api_err)
+                    if '10016' in error_str and intento < max_intentos - 1:
+                        wait_time = 1 + intento
+                        logger.warning(f"⚠️ Bybit error 10016, reintento {intento+1}/{max_intentos} en {wait_time}s...")
+                        time.sleep(wait_time)
+                        continue
+                    raise
             
             # Buscar USDT en diferentes posiciones (Bybit puede devolver diferente estructura)
             usdt_balance = balance.get('USDT', {})
@@ -167,7 +181,7 @@ class ExchangeWrapper:
             return self._balance_cache
         except Exception as e:
             logger.error(f"❌ Error obteniendo balance: {e}")
-            return {'total': 0, 'free': 0, 'used': 0}
+            return self._balance_cache if self._balance_cache else {'total': 0, 'free': 0, 'used': 0}
     
     def obtener_balance_total_usdt(self) -> float:
         """Obtiene el balance total en USDT."""
@@ -359,8 +373,20 @@ class ExchangeWrapper:
     def obtener_posicion(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Obtiene información de la posición actual de forma ultra-robusta."""
         try:
-            # 1. Intentar obtener posiciones
-            positions = self._exchange.fetch_positions()
+            # Reintentos para errores temporales de Bybit
+            max_intentos = 3
+            for intento in range(max_intentos):
+                try:
+                    positions = self._exchange.fetch_positions()
+                    break
+                except Exception as api_err:
+                    error_str = str(api_err)
+                    if '10016' in error_str and intento < max_intentos - 1:
+                        wait_time = 1 + intento
+                        logger.warning(f"⚠️ Bybit error 10016 en posiciones, reintento {intento+1}/{max_intentos} en {wait_time}s...")
+                        time.sleep(wait_time)
+                        continue
+                    raise
             
             for pos in positions:
                 # CCXT 4.x usa 'contracts' para el tamaño, pero 'size' o 'positionAmt' pueden estar en 'info'

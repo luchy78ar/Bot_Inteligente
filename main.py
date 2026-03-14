@@ -433,8 +433,9 @@ class BotTrading:
         if self.telegram: await self.telegram.forzar_refresco()
 
     async def loop_trading(self) -> None:
-        logger.info("🚀 Monitor de Precio Real-Time Iniciado (1s)")
+        logger.info("🚀 Monitor de Precio Real-Time Iniciado (5s)")
         contador_pesado = 0
+        _ultimo_refresco_telegram = 0
         while self.estado.running:
             try:
                 # 1. ACTUALIZAR PRECIO (CADA 1 SEGUNDO) - PRIORIDAD MÁXIMA
@@ -442,17 +443,22 @@ class BotTrading:
                 if precio_fresco > 0:
                     self.estado.precio_actual = precio_fresco
                 
-                # 2. PROCESAR TRADING (CADA 2 SEGUNDOS)
-                if contador_pesado % 2 == 0:
+                # 2. PROCESAR TRADING (CADA 5 SEGUNDOS)
+                if contador_pesado % 5 == 0:
                     await self._procesar_trading()
                 
-                # 3. ACTUALIZAR DASHBOARDS (WEB Y TELEGRAM)
+                # 3. ACTUALIZAR DASHBOARDS (WEB cada 5s, TELEGRAM cada 10s máx)
                 estado_real = await self.obtener_estado()
                 actualizar_estado(estado_real)
-                if self.telegram: await self.telegram.forzar_refresco(estado_real)
+                
+                if self.telegram:
+                    ahora = datetime.now().timestamp()
+                    if ahora - _ultimo_refresco_telegram >= 10:
+                        await self.telegram.forzar_refresco(estado_real)
+                        _ultimo_refresco_telegram = ahora
                 
                 contador_pesado += 1
-                await asyncio.sleep(1) # El latido del bot ahora es de 1 segundo
+                await asyncio.sleep(1)
             except asyncio.CancelledError: break
             except Exception as e:
                 logger.error(f"❌ Loop error: {e}")

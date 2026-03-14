@@ -107,14 +107,13 @@ class BotTelegram:
 
     async def forzar_refresco(self, estado_externo: Optional[Dict[str, Any]] = None) -> None:
         """Actualiza el dashboard usando un estado proporcionado o consultando el actual."""
-        if not self._chat_id or not self._msg_dashboard_id: return
+        if not self._chat_id: return
             
         try:
             if estado_externo:
                 estado = estado_externo
                 self._ultimo_estado = estado
             else:
-                # Si no hay estado externo, obtenerlo con timeout corto
                 try:
                     estado = await asyncio.wait_for(self.obtener_estado(), timeout=2.0)
                     self._ultimo_estado = estado
@@ -127,18 +126,35 @@ class BotTelegram:
             else:
                 texto, kb = self._crear_dashboard(estado)
                 
-            try:
-                await self.app.bot.edit_message_text(
-                    chat_id=self._chat_id, message_id=self._msg_dashboard_id,
-                    text=texto, reply_markup=kb, parse_mode='HTML'
-                )
-            except Exception as e:
-                if "Message is not modified" in str(e):
-                    await self.app.bot.edit_message_reply_markup(
+            mensaje_editado = False
+            if self._msg_dashboard_id:
+                try:
+                    await self.app.bot.edit_message_text(
                         chat_id=self._chat_id, message_id=self._msg_dashboard_id,
-                        reply_markup=kb
+                        text=texto, reply_markup=kb, parse_mode='HTML'
                     )
-                else: raise e
+                    mensaje_editado = True
+                except Exception as e:
+                    error_str = str(e)
+                    if "Message is not modified" in error_str:
+                        await self.app.bot.edit_message_reply_markup(
+                            chat_id=self._chat_id, message_id=self._msg_dashboard_id,
+                            reply_markup=kb
+                        )
+                        mensaje_editado = True
+                    elif "message to edit not found" in error_str or "MESSAGE_ID_INVALID" in error_str or "Bad Request" in error_str:
+                        self._msg_dashboard_id = None
+                    else:
+                        logger.debug(f"ℹ️ Edit attempt: {error_str}")
+            
+            if not mensaje_editado and self._msg_dashboard_id is None:
+                try:
+                    msg = await self.app.bot.send_message(
+                        chat_id=self._chat_id, text=texto, reply_markup=kb, parse_mode='HTML'
+                    )
+                    self._msg_dashboard_id = msg.message_id
+                except Exception as e:
+                    logger.debug(f"ℹ️ Send attempt: {e}")
         except Exception as e:
             logger.debug(f"ℹ️ Refresh info: {e}")
 
@@ -151,12 +167,17 @@ class BotTelegram:
             logger.error(f"❌ Error enviando notificación: {e}")
 
     async def _actualizar_dashboard_loop(self) -> None:
+        _ultima_actualizacion = 0
         while True:
             try:
-                await asyncio.sleep(3) # Reducido a 3s para máxima fluidez
+                await asyncio.sleep(10) # Reducido a 10s para evitar rate limits
                 if not self._msg_dashboard_id or self._menu_activo or self._transicion_en_curso:
                     continue
-                await self.forzar_refresco()
+                # Solo actualizar cada 10 segundos como máximo
+                ahora = datetime.now().timestamp()
+                if ahora - _ultima_actualizacion >= 10:
+                    await self.forzar_refresco()
+                    _ultima_actualizacion = ahora
             except asyncio.CancelledError: break
             except Exception as e:
                 logger.error(f"❌ Error en bucle Telegram: {e}")
