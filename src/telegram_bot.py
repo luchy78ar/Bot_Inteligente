@@ -383,25 +383,34 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
         current_symbol = cfg.get('symbol', 'BTC/USDT:USDT')
         symbol_name = current_symbol.split('/')[0] if current_symbol else 'BTC'
         
+        leverage = cfg.get('leverage') or 20
+        take_profit_pct = (cfg.get('take_profit_pct') or 0.015) * 100
+        max_dca_levels = cfg.get('max_dca_levels') or 2
+        max_ciclos = cfg.get('max_ciclos') or 0
+        dca_step_pct = (cfg.get('dca_step_pct') or 0.01) * 100
+        step_multiplier = cfg.get('step_multiplier') or 1.1
+        trailing_distancia = (cfg.get('trailing_distancia') or 0.005) * 100
+        initial_volume_pct = (cfg.get('initial_volume_pct') or 0.01) * 100
+        
         keyboard = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton(f"🪙 PAR: {symbol_name}/USDT", callback_data="menu_symbol"),
-                InlineKeyboardButton(f"⚡ Lev: {cfg.get('leverage')}x", callback_data="menu_leverage")
+                InlineKeyboardButton(f"⚡ Lev: {leverage}x", callback_data="menu_leverage")
             ],
             [
-                InlineKeyboardButton(f"🎯 TP: {cfg.get('take_profit_pct')*100:.1f}%", callback_data="menu_tp"),
-                InlineKeyboardButton(f"📉 Niveles DCA: {cfg.get('max_dca_levels')}", callback_data="menu_max_dca")
+                InlineKeyboardButton(f"🎯 TP: {take_profit_pct:.1f}%", callback_data="menu_tp"),
+                InlineKeyboardButton(f"📉 Niveles DCA: {max_dca_levels}", callback_data="menu_max_dca")
             ],
             [
-                InlineKeyboardButton(f"🔄 Ciclos: {'∞' if cfg.get('max_ciclos', 0) == 0 else cfg.get('max_ciclos')}", callback_data="toggle_ciclos"),
-                InlineKeyboardButton(f"📏 Step: {cfg.get('dca_step_pct')*100:.2f}%", callback_data="menu_step")
+                InlineKeyboardButton(f"🔄 Ciclos: {'∞' if max_ciclos == 0 else max_ciclos}", callback_data="toggle_ciclos"),
+                InlineKeyboardButton(f"📏 Step: {dca_step_pct:.2f}%", callback_data="menu_step")
             ],
             [
-                InlineKeyboardButton(f"✖️ Mult. Step: {cfg.get('step_multiplier')}x", callback_data="menu_mult_step"),
-                InlineKeyboardButton(f"🪜 Escalón: {cfg.get('trailing_distancia')*100:.2f}%", callback_data="menu_trailing")
+                InlineKeyboardButton(f"✖️ Mult. Step: {step_multiplier}x", callback_data="menu_mult_step"),
+                InlineKeyboardButton(f"🪜 Escalón: {trailing_distancia:.2f}%", callback_data="menu_trailing")
             ],
             [
-                InlineKeyboardButton(f"💵 Vol: {cfg.get('initial_volume_pct')*100:.1f}%", callback_data="menu_volumen"),
+                InlineKeyboardButton(f"💵 Vol: {initial_volume_pct:.1f}%", callback_data="menu_volumen"),
                 InlineKeyboardButton(f"🧠 TP INT: {tp_int}", callback_data="cfg_tp_inteligente")
             ],
             [

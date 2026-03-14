@@ -98,12 +98,13 @@ class BotTrading:
                 self.estado.pnl_realizado = estado_db.get('pnl_realizado', 0.0)
                 self.estado.ciclos_completados = estado_db.get('ciclos_completados', 0)
             # Prioridad: ENV siempre tiene prioridad sobre DB
-            env_testnet = os.getenv("TESTNET", "").lower() == "true"
-            if env_testnet:
-                self.estado.testnet = True
-            elif estado_db and 'testnet' in estado_db:
-                self.estado.testnet = bool(estado_db['testnet'])
+            # Si TESTNET está definido en ENV, usarlo; sino usar config por defecto
+            env_testnet_raw = os.getenv("TESTNET", None)
+            if env_testnet_raw is not None:
+                # ENV está definido, usarlo
+                self.estado.testnet = env_testnet_raw.lower() == "true"
             else:
+                # ENV no definido, usar config por defecto
                 self.estado.testnet = cfg.TESTNET
             
             if estado_db:
