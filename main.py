@@ -682,6 +682,9 @@ class BotTrading:
         if self.persistencia: await self.persistencia.cerrar()
 
 async def main():
+    # INICIAR WEB SERVER PRIMERO para healthcheck
+    iniciar_servidor()
+    
     bot = BotTrading()
     if await bot.inicializar():
         # AUTO-ARRANQUE INTELIGENTE (Solo si estaba running en la DB)
