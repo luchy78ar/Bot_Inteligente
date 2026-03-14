@@ -256,8 +256,18 @@ class BotTelegram:
         emoji_p = "🛑" if parar_tp else "🔄"
         label_p = "ÚLTIMA OP: ON" if parar_tp else "MODO: INFINITO"
         
+        # Si hay posición, solo mostrar DETENER (no iniciar)
+        if tiene_posicion:
+            btn_principal = [InlineKeyboardButton("🛑 DETENER", callback_data="toggle_trading")]
+        elif running:
+            btn_principal = [InlineKeyboardButton("🛑 DETENER", callback_data="toggle_trading")]
+        elif estado.get('_procesando'):
+            btn_principal = [InlineKeyboardButton("⏳ PROCESANDO...", callback_data="noop")]
+        else:
+            btn_principal = [InlineKeyboardButton("🚀 INICIAR", callback_data="toggle_trading")]
+        
         botones = [
-            [InlineKeyboardButton("🚀 " + ("DETENER" if running else ("⏳ PROCESANDO..." if estado.get('_procesando') else "INICIAR")), callback_data="toggle_trading" if not estado.get('_procesando') else "noop")],
+            btn_principal,
             [InlineKeyboardButton(f"{emoji_p} {label_p}", callback_data="toggle_last_op")],
             [InlineKeyboardButton("⚙️ Configuración", callback_data="menu_config")]
         ]
