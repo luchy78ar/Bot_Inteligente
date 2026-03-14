@@ -439,8 +439,16 @@ class BotTrading:
                 tarea.cancel()
             self.tareas.clear()
 
+            # Obtener posiciones antes de cerrar
+            posiciones_antes = self.exchange.obtener_posicion(self.simbolo_actual)
+            logger.warning(f"🚨 PÁNICO: Posición detectada: {posiciones_antes}")
+            
             loop = asyncio.get_event_loop()
             exito_exchange = await loop.run_in_executor(None, self.exchange.cerrar_todas_posiciones)
+            
+            # Verificar que realmente se cerró
+            posiciones_despues = self.exchange.obtener_posicion(self.simbolo_actual)
+            logger.warning(f"🚨 PÁNICO: Posición después de cerrar: {posiciones_despues}")
             
             await self.persistencia.limpiar_posiciones()
             
