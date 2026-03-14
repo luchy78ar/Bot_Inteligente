@@ -797,6 +797,11 @@ async def main():
                 estado_db = await bot.persistencia.obtener_estado_bot()
                 was_running = estado_db.get('running', False) if estado_db else False
                 
+                # ACTUALIZAR WEB INMEDIATAMENTE
+                estado_inicial = await bot.obtener_estado()
+                actualizar_estado(estado_inicial)
+                logger.info(f"🌐 Estado inicial enviado a web: running={estado_inicial.get('running')}, posiciones={estado_inicial.get('posiciones')}, balance={estado_inicial.get('balance_total')}")
+                
                 if was_running:
                     logger.info("⚡ AUTO-ARRANQUE: Reanudando trading...")
                     await bot.iniciar_trading()
@@ -805,15 +810,20 @@ async def main():
         except Exception as e_init:
             logger.warning(f"⚠️ Error inicializando: {e_init}. Solo Telegram y Web activos.")
         
+        logger.info("🔄 Iniciando loop de mantenimiento...")
+        
         # Loop de mantenimiento - actualizar web cada 5 segundos aunque esté pausado
         while True:
             try:
-                if bot.exchange:
+                if bot and bot.exchange:
+                    logger.debug(f"🔄 Actualizando estado - exchange existe")
                     # Siempre verificar posición y actualizar web
                     estado_fresco = await bot.obtener_estado()
                     actualizar_estado(estado_fresco)
+                else:
+                    logger.debug(f"⚠️ Exchange no disponible aún")
             except Exception as e:
-                logger.debug(f"Debug loop: {e}")
+                logger.error(f"❌ Error en loop mantenimiento: {e}")
             await asyncio.sleep(5)
             
     except Exception as e:
