@@ -432,46 +432,40 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
                             pass
                         self._transicion_en_curso = False
                         return
-                    
-                    try:
-                        await query.answer("⏳ Iniciando operación...", show_alert=True)
-                    except:
-                        pass
                 
                 if is_running:
                     await self.detener_bot()
+                    self._menu_activo = False
+                    self._transicion_en_curso = False
+                    await self.forzar_refresco()
+                else:
+                    # Cambiar botón a "Procesando..." mientras espera
+                    estado_procesando = estado.copy()
+                    estado_procesando['_procesando'] = True
+                    texto_proc, kb_proc = self._crear_dashboard(estado_procesando)
                     try:
-                        await query.answer("⏹️ Bot detenido", show_alert=False)
+                        await query.edit_message_text(texto_proc, reply_markup=kb_proc, parse_mode='HTML')
                     except:
                         pass
-                else:
+                    
                     await self.iniciar_bot()
                     
-                    # Esperar hasta que haya una posición o pasen 5 segundos
-                    for _ in range(10):
+                    # Esperar hasta que haya una posición
+                    for _ in range(20):
                         await asyncio.sleep(0.5)
                         estado_actual = await self.obtener_estado()
                         if estado_actual.get('posiciones', 0) > 0:
-                            try:
-                                await query.answer("✅ ¡Operación abierta!", show_alert=True)
-                            except:
-                                pass
-                            break
-                    else:
-                        try:
-                            await query.answer("⏳ Buscando entrada...", show_alert=False)
-                        except:
-                            pass
-                
-                await asyncio.sleep(0.5)
-                self._menu_activo = False
+                            self._menu_activo = False
+                            self._transicion_en_curso = False
+                            await self.forzar_refresco(estado_actual)
+                            return
+                    
+                    # Si no abrió posición, mostrar dashboard normal
+                    self._menu_activo = False
+                    self._transicion_en_curso = False
+                    await self.forzar_refresco()
             except Exception as e:
                 logger.error(f"❌ Error toggle: {e}")
-                try:
-                    await query.answer(f"❌ Error: {str(e)[:50]}", show_alert=True)
-                except:
-                    pass
-            finally:
                 self._transicion_en_curso = False
             return
 
