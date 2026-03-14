@@ -313,7 +313,8 @@ class BotTrading:
                 "config": self.config.to_dict(),
                 "precio_tp": precio_tp,
                 "precio_sl": precio_sl,
-                "timestamp_apertura": info_posiciones.get("timestamp_apertura")
+                "timestamp_apertura": info_posiciones.get("timestamp_apertura"),
+                "max_drawdown": self.estado.max_drawdown
             }
             
             self._estado_cache = estado_fresco
@@ -694,6 +695,10 @@ class BotTrading:
                 if self.estado.ciclo_actual:
                     await self.persistencia.cerrar_ciclo(self.estado.ciclo_actual.ciclo_id, self.exchange.obtener_balance_total_usdt(), pnl)
                     self.estado.ciclo_actual = None
+                
+                # REINICIAR: Resetear max_drawdown para el nuevo ciclo
+                self.estado.max_drawdown = 0.0
+                
                 if cfg.REINVEST_MODE and self.estado.running:
                     await asyncio.sleep(5)
                     await self._buscar_nueva_oportunidad()
