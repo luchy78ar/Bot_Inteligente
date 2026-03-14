@@ -553,6 +553,9 @@ class BotTrading:
                     estado_fresco = await self.obtener_estado()
                     actualizar_estado(estado_fresco)
                     if self.telegram: await self.telegram.forzar_refresco()
+                else:
+                    logger.warning("⚠️ Fallo al abrir posición inicial. Esperando 30s para reintentar...")
+                    await asyncio.sleep(30)
             else:
                 logger.info(f"⏸️ Sin señal clara, esperando siguiente ciclo...")
         except Exception as e:

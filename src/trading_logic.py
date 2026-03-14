@@ -76,25 +76,46 @@ class EstrategiaMartingala:
     
     async def calcular_tamano_posicion(self, symbol: str, balance: float, precio: float, nivel_dca: int = 0) -> float:
         try:
-            logger.info(f"🔔 calcular_tamano_posicion: balance={balance}, precio={precio}, leverage={self.config.leverage}, initial_volume_pct={self.config.initial_volume_pct}")
+            logger.info(f"🔔 Calculando tamaño: balance=${balance}, precio=${precio}, DCA={nivel_dca}")
             
-            notional_minimo = 6.2
-            volumen_usdt = (balance * self.config.initial_volume_pct) * self.config.leverage
-            volumen_real = max(volumen_usdt, notional_minimo)
+            # 1. Obtener límites del exchange
+            info = self.exchange.obtener_info_symbolo(symbol)
+            min_amount = info.get('min_amount', 0.001)
+            min_notional = info.get('min_notional', 5.0)
             
-            logger.info(f"🔔 volumen_usdt={volumen_usdt}, volumen_real={volumen_real}")
+            # 2. Calcular volumen teórico según configuración
+            # Usamos el % de balance configurado multiplicado por el apalancamiento
+            volumen_usdt_teorico = (balance * self.config.initial_volume_pct) * self.config.leverage
+            # Aplicar multiplicador de DCA si corresponde
+            volumen_usdt_actual = volumen_usdt_teorico * (self.config.volume_multiplier ** nivel_dca)
             
-            volumen_actual = volumen_real * (self.config.volume_multiplier ** nivel_dca)
+            # 3. Asegurar el MÍNIMO NOTIONAL (ej. $5 o $10 según el exchange)
+            volumen_final_usdt = max(volumen_usdt_actual, min_notional)
             
+            # 4. Convertir a cantidad de tokens
+            cantidad_teorica = volumen_final_usdt / precio
+            
+            # 5. Asegurar el MÍNIMO de cantidad (ej. 0.001 BTC)
+            cantidad_ajustada = max(cantidad_teorica, min_amount)
+            
+            # 6. Validar contra la posición máxima permitida por el balance real
             cantidad_maxima = self.exchange.calcular_posicion_maxima(symbol, self.config.leverage, precio)
-            logger.info(f"🔔 cantidad_maxima={cantidad_maxima}, volumen_actual={volumen_actual}")
             
-            if cantidad_maxima <= 0:
-                return 0
+            cantidad_final = min(cantidad_ajustada, cantidad_maxima)
             
-            cantidad = min(volumen_actual / precio, cantidad_maxima)
-            logger.info(f"🔔 cantidad antes de precision={cantidad}")
-            return self.exchange.cantidad_a_precision(symbol, cantidad)
+            # 7. Verificación final de viabilidad
+            if cantidad_final < min_amount:
+                logger.warning(f"⚠️ Operación inviable: Cantidad final {cantidad_final} < Mínimo {min_amount}")
+                return 0.0
+            
+            notional_final = cantidad_final * precio
+            if notional_final < min_notional:
+                logger.warning(f"⚠️ Operación inviable: Notional ${notional_final:.2f} < Mínimo ${min_notional:.2f}")
+                return 0.0
+
+            res = self.exchange.cantidad_a_precision(symbol, cantidad_final)
+            logger.info(f"✅ Tamaño final calculado: {res} tokens (${notional_final:.2f})")
+            return res
         except Exception as e:
             logger.error(f"❌ Error calculando tamaño: {e}")
             return 0.0
