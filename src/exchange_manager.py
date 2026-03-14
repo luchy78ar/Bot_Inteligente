@@ -209,13 +209,13 @@ class ExchangeWrapper:
             return self._balance_cache if self._balance_cache else {'total': 0, 'free': 0, 'used': 0}
     
     def obtener_balance_total_usdt(self) -> float:
-        """Obtiene el balance total en USDT."""
-        balance = self.obtener_balance()
+        """Obtiene el balance total en USDT (fresco, sin caché)."""
+        balance = self.obtener_balance_fresco()
         return balance.get('total', 0)
     
     def obtener_balance_disponible_usdt(self) -> float:
-        """Obtiene el balance disponible (free) en USDT."""
-        balance = self.obtener_balance()
+        """Obtiene el balance disponible (free) en USDT (fresco, sin caché)."""
+        balance = self.obtener_balance_fresco()
         return balance.get('free', 0)
     
     def calcular_posicion_maxima(self, symbol: str, leverage: int, precio: float) -> float:

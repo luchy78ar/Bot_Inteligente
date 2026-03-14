@@ -218,7 +218,7 @@ class BotTrading:
                 }
             
             # Sin caché para el balance (siempre fresco)
-            balance = self.exchange.obtener_balance()
+            balance = self.exchange.obtener_balance_fresco()
             
             # Solo caché para otros datos (1 segundo)
             if hasattr(self, '_estado_cache') and (ahora - getattr(self, '_ultimo_fetch_estado', 0) < 1.0):
