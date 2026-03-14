@@ -603,18 +603,22 @@ class BotTrading:
             balance = self.exchange.obtener_balance_fresco().get('total', 0)
             logger.info(f"💰 Balance fresco: {balance}")
             
+            # Obtener el capital inicial del ciclo anterior para mantener inversión constante
+            ciclo_anterior = await self.persistencia.obtener_ciclo_activo()
+            capital_base = ciclo_anterior.capital_inicial if ciclo_anterior else balance
+            
             analis = self.estrategia.analizar_y_decidir(self.simbolo_actual)
             logger.info(f"📊 Resultado análisis: direccion={analis.direccion}, tendencia={analis.tendencia}, confianza={analis.confianza}")
             
             if analis.direccion != TradeDirection.NEUTRAL:
-                logger.info(f"🚀 Abriendo posición en {analis.direccion}...")
-                posicion = await self.estrategia.abrir_posicion_inicial(self.simbolo_actual, analis.direccion, balance)
+                logger.info(f"🚀 Abriendo posición en {analis.direccion} con capital base: {capital_base}...")
+                posicion = await self.estrategia.abrir_posicion_inicial(self.simbolo_actual, analis.direccion, capital_base)
                 if posicion:
                     ciclo = CicloTrading(
                         ciclo_id=await self.persistencia.obtener_ultimo_ciclo_id() + 1,
                         symbol=self.simbolo_actual,
                         direccion_inicial=analis.direccion,
-                        capital_inicial=balance,
+                        capital_inicial=capital_base,
                         timestamp_inicio=datetime.now().timestamp()
                     )
                     await self.persistencia.guardar_ciclo(ciclo)
