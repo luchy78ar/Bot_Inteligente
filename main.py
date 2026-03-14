@@ -253,8 +253,8 @@ class BotTrading:
             
             estado_fresco = {
                 "running": self.estado.running,
-                "symbol": self.estado.symbol,
-                "exchange": "Binance",
+                "symbol": self.simbolo_actual,
+                "exchange": self.exchange.exchange_id.upper() if self.exchange else "EXCHANGE",
                 "testnet": self.estado.testnet,
                 "precio_actual": precio_actual,
                 "precio_entrada": precio_entrada,
@@ -643,6 +643,10 @@ class BotTrading:
 async def main():
     bot = BotTrading()
     if await bot.inicializar():
+        # FORZAR INICIO DE TRADING AUTOMÁTICO
+        await bot.iniciar_trading()
+        logger.info("⚡ AUTO-ARRANQUE: Trading iniciado automáticamente")
+        
         try:
             while True: await asyncio.sleep(1)
         except asyncio.CancelledError: pass
