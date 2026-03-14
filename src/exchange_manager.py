@@ -483,11 +483,16 @@ class ExchangeWrapper:
                     params = {'category': 'linear'}
                     self._exchange.set_leverage(leverage_int, symbol_buscar, params)
                     logger.info(f"✅ Apalancamiento Bybit configurado con params: {leverage_int}x en {symbol_buscar}")
+                elif "leverage not modified" in str(e).lower():
+                    logger.info(f"ℹ️ El apalancamiento ya estaba en {leverage_int}x")
                 else:
                     raise e
             return True
         except Exception as e:
-            logger.error(f"❌ Error configurando apalancamiento/margen: {e}")
+            if "leverage not modified" in str(e).lower():
+                logger.info(f"ℹ️ El apalancamiento ya estaba configurado")
+            else:
+                logger.error(f"❌ Error configurando apalancamiento/margen: {e}")
             return False
 
     def obtener_posicion(self, symbol: str) -> Optional[Dict[str, Any]]:
