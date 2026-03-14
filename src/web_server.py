@@ -43,7 +43,8 @@ def index():
     entrada_breakeven = estado_bot.get('precio_entrada', 0)
     precio_inicial = estado_bot.get('precio_inicial', entrada_breakeven)
     pnl = estado_bot.get('pnl', 0)
-    pnl_pct = estado_bot.get('pnl_pct', 0)
+    pnl_pct_cartera = estado_bot.get('pnl_pct', 0) # Sobre balance total
+    roe_real = estado_bot.get('roe_real_pct', pnl_pct_cartera) # Sobre margen (como el exchange)
     lado = str(estado_bot.get('lado', 'NEUTRAL')).upper()
     testnet = estado_bot.get('testnet', True)
     from datetime import datetime
@@ -71,6 +72,7 @@ def index():
     # Lógica Visual
     pnl_color = "#02c076" if pnl >= 0 else "#f84960"
     pnl_sign = "+" if pnl >= 0 else ""
+    roe_sign = "+" if roe_real >= 0 else ""
     lado_text = "COMPRA (LONG)" if lado == "LONG" else "VENTA (SHORT)" if lado == "SHORT" else "NEUTRAL"
     lado_color = "#02c076" if lado == "LONG" else "#f84960" if lado == "SHORT" else "#848e9c"
     
@@ -220,9 +222,9 @@ def index():
             <!-- SECCIÓN PRINCIPAL PNL -->
             <section class="pnl-hero">
                 <div>
-                    <div class="hero-label">Rentabilidad (ROE%)</div>
+                    <div class="hero-label">Rentabilidad (ROE Real)</div>
                     <div style="display: flex; align-items: baseline;">
-                        <div class="hero-val-main">{pnl_sign}{pnl_pct:.2f}%</div>
+                        <div class="hero-val-main">{roe_sign}{roe_real:.2f}%</div>
                     </div>
                 </div>
                 <div style="text-align: right; display: flex; align-items: center; gap: 30px;">
@@ -276,7 +278,7 @@ def index():
                     <div class="data-row"><span>Inversión Real (Margen)</span><span class="val-mono" style="color: var(--neon-green);">${invertido:,.2f}</span></div>
                     <div class="data-row"><span>Exposición (Apalancado)</span><span class="val-mono" style="color: var(--neon-blue);">${apalancado:,.2f}</span></div>
                     <div class="data-row"><span>Ratio de Margen</span><span class="val-mono" style="color: var(--neon-yellow);">{(invertido/balance*100) if balance > 0 else 0:.2f}%</span></div>
-                    <div class="data-row"><span>Máx. Drawdown (Récord)</span><span class="val-mono" style="color: var(--neon-red);">{abs(estado_bot.get('max_drawdown', 0)):.2f}%</span></div>
+                    <div class="data-row"><span>PNL Cartera Total</span><span class="val-mono" style="color: {pnl_color};">{pnl_sign}{pnl_pct_cartera:.2f}%</span></div>
                 </div>
                 <div class="progress-block">
                     <div class="progress-info"><span>Riesgo Liquidación</span><span>{int(riesgo_liq)}%</span></div>
