@@ -21,7 +21,7 @@ PARES_POPULARES = [
     ("BTC/USDT:USDT", "BTC"), ("ETH/USDT:USDT", "ETH"), ("SOL/USDT:USDT", "SOL"),
     ("XRP/USDT:USDT", "XRP"), ("BNB/USDT:USDT", "BNB"), ("ADA/USDT:USDT", "ADA"),
     ("DOGE/USDT:USDT", "DOGE"), ("AVAX/USDT:USDT", "AVAX"), ("DOT/USDT:USDT", "DOT"),
-    ("LINK/USDT:USDT", "LINK"), ("LTC/USDT:USDT", "LTC"),
+    ("MATIC/USDT:USDT", "MATIC"), ("LINK/USDT:USDT", "LINK"), ("LTC/USDT:USDT", "LTC"),
     ("TRX/USDT:USDT", "TRX"), ("TON/USDT:USDT", "TON"), ("SHIB/USDT:USDT", "SHIB"),
     ("PEPE/USDT:USDT", "PEPE"), ("UNI/USDT:USDT", "UNI"), ("ATOM/USDT:USDT", "ATOM"),
     ("XLM/USDT:USDT", "XLM"), ("ETC/USDT:USDT", "ETC"), ("XMR/USDT:USDT", "XMR"),
@@ -38,7 +38,7 @@ PARES_POPULARES = [
     ("IMX/USDT:USDT", "IMX"), ("RUNE/USDT:USDT", "RUNE"), ("ORDI/USDT:USDT", "ORDI")
 ]
 
-PARES_POPULARES_ordenado = sorted(PARES_POPULARES, key=lambda x: x[1])
+PARES_POPULARES_ordenado = PARES_POPULARES
 
 PARAMETROS_CONFIG = {
     "symbol": {"nombre": "Par de Trading", "tipo": "str"},
