@@ -318,6 +318,7 @@ class BotTrading:
             
             self._estado_cache = estado_fresco
             self._ultimo_fetch_estado = ahora
+            actualizar_estado(estado_fresco)
             return estado_fresco
         except Exception as e:
             logger.error(f"❌ Error obteniendo estado: {e}")
@@ -752,17 +753,20 @@ async def main():
                     await bot.iniciar_trading()
                 else:
                     logger.info("⏸️ BOT EN ESPERA: Usa Telegram para iniciar.")
-            else:
-                logger.warning("⚠️ Exchange no conectado. Solo Telegram y Web activos.")
-        except Exception as e:
-            logger.warning(f"⚠️ Error conectando exchange: {e}. Solo Telegram y Web activos.")
+        except Exception as e_init:
+            logger.warning(f"⚠️ Error inicializando: {e_init}. Solo Telegram y Web activos.")
         
-        # Mantener alive
-        while True: await asyncio.sleep(3600)
+        # Loop de mantenimiento - actualizar web cada 5 segundos aunque esté pausado
+        while True:
+            try:
+                if bot.exchange:
+                    # Siempre verificar posición y actualizar web
+                    estado_fresco = await bot.obtener_estado()
+                    actualizar_estado(estado_fresco)
+            except Exception as e:
+                logger.debug(f"Debug loop: {e}")
+            await asyncio.sleep(5)
             
-    except Exception as e:
-        logger.error(f"❌ Error en main: {e}")
-        while True: await asyncio.sleep(3600)
     except Exception as e:
         logger.error(f"❌ Error en main: {e}")
         while True: await asyncio.sleep(3600)
