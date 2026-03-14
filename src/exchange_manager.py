@@ -653,17 +653,23 @@ class ExchangeWrapper:
                     params=params
                 )
             except Exception as e_order:
-                # Si falla por reduce-only o similar, intentamos cierre BRUTO sin reduceOnly
-                if '110017' in str(e_order) or 'reduce-only' in str(e_order).lower():
+                error_str = str(e_order)
+                debe_reintentar = '110017' in error_str or 'reduce-only' in error_str.lower() or 'same side' in error_str.lower()
+                
+                if debe_reintentar:
                     logger.warning("⚠️ Cierre con reduce-only falló. Intentando cierre radical sin restricción...")
                     params.pop('reduceOnly', None)
-                    orden = self._exchange.create_order(
-                        symbol=symbol_buscar,
-                        type='market',
-                        side=lado_orden,
-                        amount=cantidad_a_cerrar,
-                        params=params
-                    )
+                    try:
+                        orden = self._exchange.create_order(
+                            symbol=symbol_buscar,
+                            type='market',
+                            side=lado_orden,
+                            amount=cantidad_a_cerrar,
+                            params=params
+                        )
+                    except Exception as e_retry:
+                        logger.error(f"❌ Fallback también falló: {e_retry}")
+                        raise e_retry
                 else:
                     raise e_order
             
