@@ -302,6 +302,7 @@ class BotTrading:
             elif param == "symbol":
                 self.estado.symbol = valor
                 self.simbolo_actual = valor
+                self.config.symbol = valor
                 await self.persistencia.guardar_config(param, valor)
                 exito = True
             elif hasattr(self.config, param):
