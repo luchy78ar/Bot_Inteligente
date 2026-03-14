@@ -97,20 +97,21 @@ class BotTrading:
             if estado_db:
                 self.estado.pnl_realizado = estado_db.get('pnl_realizado', 0.0)
                 self.estado.ciclos_completados = estado_db.get('ciclos_completados', 0)
-                # Prioridad: ENV > DB
-                # Primero usar ENV, luego DB solo si no está definido
-                env_testnet = os.getenv("TESTNET", "false").lower() == "true"
-                if 'testnet' in estado_db:
-                    self.estado.testnet = env_testnet or bool(estado_db['testnet'])
-                else:
-                    self.estado.testnet = env_testnet
+            # Prioridad: ENV siempre tiene prioridad sobre DB
+            env_testnet = os.getenv("TESTNET", "").lower() == "true"
+            if env_testnet:
+                self.estado.testnet = True
+            elif estado_db and 'testnet' in estado_db:
+                self.estado.testnet = bool(estado_db['testnet'])
+            else:
+                self.estado.testnet = cfg.TESTNET
+            
+            if estado_db:
                 if 'symbol' in estado_db:
                     self.estado.symbol = estado_db['symbol']
                     self.simbolo_actual = self.estado.symbol
                     self.config.symbol = self.simbolo_actual
                 
-                # CARGA DINÁMICA DE TODA LA CONFIGURACIÓN RESTANTE
-                # (Leverage, TP, DCA Step, Multipliers, etc.)
                 for param in vars(self.config).keys():
                     if param == 'symbol': continue
                     val_db = await self.persistencia.obtener_config(param)
@@ -119,8 +120,6 @@ class BotTrading:
                         logger.debug(f"⚙️ Config persistente cargada: {param} = {val_db}")
                 
                 logger.info(f"📂 Configuración persistente cargada desde DB (testnet={self.estado.testnet})")
-            else:
-                logger.info(f"📂 Configuración cargada desde perfil por defecto")
             
             # 3. Exchange
             testnet = self.estado.testnet  # Usar el valor que ya leímos de la DB o el default
