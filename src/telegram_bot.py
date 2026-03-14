@@ -178,8 +178,11 @@ class BotTelegram:
                         )
                         mensaje_editado = True
                     except RetryAfter as e_flood:
-                        self._retry_after_edit_until = time.time() + e_flood.retry_after
-                        logger.warning(f"⚠️ Flood detectado en Dash: Bloqueo por {e_flood.retry_after}s")
+                        # Capar bloqueos absurdos en refresco automático
+                        bloqueo = e_flood.retry_after
+                        if bloqueo > 300: bloqueo = 45
+                        self._retry_after_edit_until = time.time() + bloqueo
+                        logger.warning(f"⚠️ [{self._instance_id}] Flood en Dash: Bloqueo por {bloqueo}s")
                         return
                     except Exception as e_edit:
                         error_str = str(e_edit)
@@ -203,7 +206,10 @@ class BotTelegram:
                         )
                         self._msg_dashboard_id = msg.message_id
                     except RetryAfter as e_flood2:
-                        self._retry_after_edit_until = time.time() + e_flood2.retry_after
+                        bloqueo = e_flood2.retry_after
+                        if bloqueo > 300: bloqueo = 45
+                        self._retry_after_edit_until = time.time() + bloqueo
+                        logger.warning(f"⚠️ [{self._instance_id}] Flood en Send: Bloqueo por {bloqueo}s")
                     except Exception as e_send:
                         logger.debug(f"ℹ️ Send attempt: {e_send}")
             except Exception as e:
@@ -471,6 +477,21 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
     async def _callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
         data = query.data
+        user_id = str(query.from_user.id)
+        
+        if user_id != self.admin_id:
+            await query.answer("❌ No autorizado", show_alert=True)
+            return
+
+        logger.info(f"🖱️ [{self._instance_id}] Click: {data}")
+        
+        if self._transicion_en_curso and data in ["toggle_trading", "cerrar_posicion", "panic_confirm"]:
+            logger.info(f"⚠️ [{self._instance_id}] Ignorando click '{data}' debido a transición en curso.")
+            try:
+                await query.answer("⏳ Ya hay una operación en curso, por favor espera.", show_alert=True)
+            except Exception:
+                pass
+            return
         
         if data == "toggle_trading":
             try:
