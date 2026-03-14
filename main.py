@@ -805,15 +805,25 @@ class BotTrading:
 
                 # Verificar límites de parada
                 parar = False
+                razon_parada = ""
                 if getattr(self.estado, 'parar_tras_tp', False):
                     logger.info("🛑 MODO ÚLTIMA OP: Deteniendo bot...")
+                    razon_parada = "MODO ÚLTIMA OPERACIÓN FINALIZADO"
                     parar = True
                 elif self.config.max_ciclos > 0 and self.estado.ciclos_completados >= self.config.max_ciclos:
                     logger.info(f"🛑 Límite de ciclos alcanzado: {self.estado.ciclos_completados}")
+                    razon_parada = f"LÍMITE DE {self.config.max_ciclos} CICLOS ALCANZADO"
                     parar = True
                 
                 if parar:
                     await self.detener_trading()
+                    if self.telegram:
+                        msg_fin = (f"🏁 <b>{razon_parada}</b>\n\n"
+                                   f"💰 Ganancia Acumulada: <b>${self.estado.pnl_realizado:.4f}</b>\n"
+                                   f"🔄 Ciclos Totales: <b>{self.estado.ciclos_completados}</b>\n"
+                                   f"🏦 Balance Final: <b>${balance_total_despues:,.2f}</b>\n\n"
+                                   f"<i>El motor se ha detenido automáticamente.</i>")
+                        await self.telegram.notificar(msg_fin)
                     return
 
                 # Si no para, buscar nueva oportunidad después de un respiro
