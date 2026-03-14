@@ -295,6 +295,7 @@ class BotTrading:
             if param == "testnet":
                 self.estado.testnet = bool(valor)
                 await self.persistencia.guardar_config(param, valor)
+                await self.persistencia.actualizar_estado_bot(testnet=int(bool(valor)))
                 exito = True
                 reconnect = True
                 ExchangeFactory.clear_instances()
@@ -304,6 +305,7 @@ class BotTrading:
                 self.simbolo_actual = valor
                 self.config.symbol = valor
                 await self.persistencia.guardar_config(param, valor)
+                await self.persistencia.actualizar_estado_bot(symbol=valor)
                 exito = True
             elif hasattr(self.config, param):
                 if param in ['leverage', 'max_dca_levels']: valor = int(float(valor))

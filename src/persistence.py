@@ -384,7 +384,8 @@ class Persistencia:
                         "pnl_realizado": row[3],
                         "ciclos_completados": row[4],
                         "ultimo_update": row[5],
-                        "testnet": bool(row[7]) if len(row) > 7 else True
+                        "testnet": bool(row[7]) if len(row) > 7 else True,
+                        "symbol": row[8] if len(row) > 8 else 'BTC/USDT:USDT'
                     }
                 return {}
         except Exception as e:
