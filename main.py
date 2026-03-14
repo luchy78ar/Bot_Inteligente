@@ -173,7 +173,8 @@ class BotTrading:
                     self.resetear_estadisticas,
                     self.reset_maestro,
                     lambda: self.exchange,
-                    self.persistencia
+                    self.persistencia,
+                    self._instance_id
                 )
                 await self.telegram.iniciar()
             
@@ -919,7 +920,8 @@ async def main():
                 bot.resetear_estadisticas,
                 bot.reset_maestro,
                 lambda: bot.exchange,
-                bot.persistencia
+                bot.persistencia,
+                bot._instance_id
             )
             await bot.telegram.iniciar()
             set_telegram_app(bot.telegram.app, asyncio.get_event_loop())

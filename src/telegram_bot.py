@@ -71,7 +71,8 @@ class BotTelegram:
                  reset_stats_callback: Optional[Callable[[], Awaitable[bool]]] = None,
                  reset_maestro_callback: Optional[Callable[[], Awaitable[bool]]] = None,
                  obtener_exchange_callback: Optional[Callable[[], Any]] = None,
-                 persistencia: Optional[Any] = None):
+                 persistencia: Optional[Any] = None,
+                 instance_id: Optional[str] = None):
         
         self.token = token
         self.admin_id = str(admin_id)
@@ -102,8 +103,8 @@ class BotTelegram:
         self._refresh_lock = asyncio.Lock()
         self._retry_after_edit_until: float = 0.0
         self._ultimo_menu_type: str = "dashboard"
-        self._instance_id = str(uuid.uuid4())[:8]
-        logger.info(f"🤖 Bot Instance ID: {self._instance_id}")
+        self._instance_id = instance_id or str(uuid.uuid4())[:8]
+        logger.info(f"🤖 Bot Identity [Process/Telegram]: {self._instance_id}")
 
     async def iniciar(self) -> None:
         try:
@@ -140,8 +141,9 @@ class BotTelegram:
                     logger.warning(f"⚠️ Reintentando webhook en {e.retry_after}s...")
                     await asyncio.sleep(e.retry_after)
                 except Exception as e:
-                    logger.error(f"❌ Error fatal en set_webhook: {e}")
-                    break
+                    intentos_webhook -= 1
+                    logger.warning(f"⚠️ Error webhook (Intento {3-intentos_webhook}): {e}")
+                    await asyncio.sleep(2)
             
             logger.info(f"✅ Bot de Telegram [{self._instance_id}] iniciado.")
             
@@ -177,7 +179,7 @@ class BotTelegram:
                 
                 if self._menu_activo: return 
                 
-                if estado.get('posiciones', 0) > 0 or estado.get('running', False):
+                if estado.get('posiciones', 0) > 0 or estado.get('lado', 'NEUTRAL') != 'NEUTRAL':
                     texto, kb = self._crear_panel_operacion(estado)
                 else:
                     texto, kb = self._crear_dashboard(estado)
@@ -502,37 +504,37 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
         if self.persistencia:
             id_maestro = await self.persistencia.obtener_config("master_bot_id")
             if id_maestro and id_maestro != self._instance_id:
-                logger.debug(f"🔇 [{self._instance_id}] Ignorando click (No soy el maestro: {id_maestro})")
+                # Los bots no maestros también responden para que el spinner se quite silenciosamente
+                try: await query.answer()
+                except: pass
+                logger.debug(f"🔇 [{self._instance_id}] Ignorando click (Master actual es: {id_maestro})")
                 return
 
-        # 1. RESPUESTA INMEDIATA para que el botón deje de estar 'cargando'
-        try:
-            await query.answer()
-        except:
-            pass
-            
-        # 2. Protección contra flood activa
-        if time.time() < self._retry_after_edit_until:
+        # 1. Protección contra flood activa
+        ahora = time.time()
+        if ahora < self._retry_after_edit_until:
             try:
-                await query.answer("⚠️ Bot bloqueado temporalmente por flood (45s). Por favor espera.", show_alert=True)
+                await query.answer(f"⚠️ Flood Activo. Espera {int(self._retry_after_edit_until - ahora)}s.", show_alert=True)
             except: pass
             return
             
-        logger.info(f"🖱️ [{self._instance_id}] Click: {data}")
-        
+        # 2. Verificar Administrador
         if user_id != self.admin_id:
-            await query.answer("❌ No autorizado", show_alert=True)
+            try: await query.answer("❌ No autorizado", show_alert=True)
+            except: pass
             return
 
-        logger.info(f"🖱️ [{self._instance_id}] Click: {data}")
-        
+        # 3. Transición en curso
         if self._transicion_en_curso and data in ["toggle_trading", "cerrar_posicion", "panic_confirm"]:
-            logger.info(f"⚠️ [{self._instance_id}] Ignorando click '{data}' debido a transición en curso.")
-            try:
-                await query.answer("⏳ Ya hay una operación en curso, por favor espera.", show_alert=True)
-            except Exception:
-                pass
+            try: await query.answer("⏳ Ya hay una operación en curso, por favor espera.", show_alert=True)
+            except: pass
             return
+        
+        # 4. Respuesta estándar para quitar el spinner
+        try: await query.answer()
+        except: pass
+
+        logger.info(f"🖱️ [{self._instance_id}] Click: {data}")
         
         if data == "toggle_trading":
             try:
@@ -555,14 +557,14 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
                     await self.detener_bot()
                     self._menu_activo = False
                     self._transicion_en_curso = False
-                    await self.forzar_refresco()
+                    await self.forzar_refresco(manual=True)
                 else:
                     # Cambiar botón a "Procesando..." mientras espera
                     estado_procesando = estado.copy()
                     estado_procesando['_procesando'] = True
                     texto_proc, kb_proc = self._crear_dashboard(estado_procesando)
                     try:
-                        await self._safe_edit(query, texto_proc, kb_proc)
+                        await self._safe_edit(query, texto_proc, kb_proc, manual=True)
                     except:
                         pass
                     
@@ -575,13 +577,13 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
                         if estado_actual.get('posiciones', 0) > 0:
                             self._menu_activo = False
                             self._transicion_en_curso = False
-                            await self.forzar_refresco(estado_actual)
+                            await self.forzar_refresco(estado_actual, manual=True)
                             return
                     
                     # Si no abrió posición, mostrar dashboard normal
                     self._menu_activo = False
                     self._transicion_en_curso = False
-                    await self.forzar_refresco()
+                    await self.forzar_refresco(manual=True)
             except Exception as e:
                 logger.error(f"❌ Error toggle: {e}")
                 self._transicion_en_curso = False
@@ -597,59 +599,53 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
                     await query.answer(msg, show_alert=True)
                 except Exception:
                     pass
-                await self.forzar_refresco()
+                await self.forzar_refresco(manual=True)
             except Exception as e:
                 logger.error(f"❌ Error toggle_last_op: {e}")
             return
 
-        if data == "back_dashboard":
+        elif data == "back_dashboard":
             self._menu_activo = False
-            await self.forzar_refresco()
+            await self.forzar_refresco(manual=True)
+            return
+            
         elif data == "menu_config":
-            try:
-                logger.info(f"🔧 Abriendo menu config...")
-                self._menu_activo = True
-                estado = await self.obtener_estado()
-                texto, keyboard = self._crear_menu_config(estado)
-                await self._safe_edit(query, texto, keyboard)
-                logger.info(f"✅ Menu config abierto")
-            except Exception as e:
-                logger.error(f"❌ Error config: {e}")
-                try:
-                    await query.answer(f"❌ Error: {str(e)[:50]}", show_alert=True)
-                except:
-                    pass
+            self._menu_activo = True
+            estado = await self.obtener_estado()
+            texto, keyboard = self._crear_menu_config(estado)
+            await self._safe_edit(query, texto, keyboard, manual=True)
+            return
         elif data == "reset_maestro":
             try:
                 await query.answer("🔥 Ejecutando Reset Maestro...", show_alert=False)
                 # Feedback visual instantáneo
-                temp_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⏳ RESETEANDO...", callback_data="none")]])
-                await self._safe_edit(query, "⏳ <b>PROCESANDO RESET MAESTRO...</b>", temp_kb)
+                temp_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⏳ RESETEANDO...", callback_data="noop")]])
+                await self._safe_edit(query, "⏳ <b>PROCESANDO RESET MAESTRO...</b>", temp_kb, manual=True)
                 
                 if self.reset_maestro:
                     await self.reset_maestro()
                 
                 await query.answer("✅ TODO RESETEADO A CERO", show_alert=True)
                 self._menu_activo = False
-                await self.forzar_refresco()
+                await self.forzar_refresco(manual=True)
             except Exception as e:
                 logger.error(f"❌ Error reset maestro: {e}")
-                await self.forzar_refresco()
+                await self.forzar_refresco(manual=True)
             return
         elif data == "cerrar_posicion":
             await self.detener_bot()
-            await self._safe_edit(query, "✅ <b>POSICIÓN CERRADA.</b>")
+            await self._safe_edit(query, "✅ <b>POSICIÓN CERRADA.</b>", manual=True)
             await asyncio.sleep(2)
-            await self.forzar_refresco()
+            await self.forzar_refresco(manual=True)
         elif data == "panic":
             keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🚨 SÍ, CERRAR TODO", callback_data="panic_confirm")], [InlineKeyboardButton("❌ CANCELAR", callback_data="back_dashboard")]])
-            await self._safe_edit(query, "⚠️ <b>¿CONFIRMAR CIERRE TOTAL?</b>", keyboard)
+            await self._safe_edit(query, "⚠️ <b>¿CONFIRMAR CIERRE TOTAL?</b>", keyboard, manual=True)
         elif data == "panic_confirm":
-            await self._safe_edit(query, "🚨 <b>EJECUTANDO PÁNICO...</b>")
+            await self._safe_edit(query, "🚨 <b>EJECUTANDO PÁNICO...</b>", manual=True)
             if self.cerrar_todo: await self.cerrar_todo()
             await asyncio.sleep(2.5)
             self._menu_activo = False
-            await self.forzar_refresco()
+            await self.forzar_refresco(manual=True)
         elif data == "help": await self._cmd_help(update, context)
         elif data == "status": await self._cmd_start(update, context)
         elif data.startswith("menu_"):
@@ -678,7 +674,7 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
             ])
             else: return
             logger.info(f"📱 [{self._instance_id}] Abriendo sub-menu: {m}")
-            await self._safe_edit(query, f"⚙️ <b>MODIFICAR {m.upper()}</b>", kb)
+            await self._safe_edit(query, f"⚙️ <b>MODIFICAR {m.upper()}</b>", kb, manual=True)
         elif data.startswith("num_"):
             raw = data.replace("num_", "")
             
@@ -703,26 +699,25 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
             
             await self.cambiar_config(param, valor)
             texto, keyboard = self._crear_menu_config(await self.obtener_estado())
-            await self._safe_edit(query, texto, keyboard)
+            await self._safe_edit(query, texto, keyboard, manual=True)
         elif data == "cfg_tp_inteligente":
             st = await self.obtener_estado()
             await self.cambiar_config('tp_inteligente', not st['config']['tp_inteligente'])
             texto, keyboard = self._crear_menu_config(await self.obtener_estado())
-            await self._safe_edit(query, texto, keyboard)
+            await self._safe_edit(query, texto, keyboard, manual=True)
         elif data == "toggle_testnet":
             st = await self.obtener_estado()
             await self.cambiar_config('testnet', not st.get('testnet', False))
             if self.reconectar: await self.reconectar()
             texto, keyboard = self._crear_menu_config(await self.obtener_estado())
-            await self._safe_edit(query, texto, keyboard)
-
-    async def _safe_edit(self, query, text: str, keyboard: Optional[InlineKeyboardMarkup] = None) -> bool:
+            await self._safe_edit(query, texto, keyboard, manual=True)
+            
+    async def _safe_edit(self, query, text: str, keyboard: Optional[InlineKeyboardMarkup] = None, manual: bool = False) -> bool:
         """Edición segura de mensajes con manejo de flood y cool-down."""
         ahora = time.time()
         
-        # Protección de cool-down mínimo (5 segundos entre ediciones manuales)
-        if ahora - getattr(self, '_last_edit_time', 0) < 5:
-            # Si es muy pronto, ignoramos silenciosamente para no saturar
+        # Protección de cool-down solo para automático (manual=False)
+        if not manual and ahora - getattr(self, '_last_edit_time', 0) < 10:
             return False
 
         if ahora < self._retry_after_edit_until:
