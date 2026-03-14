@@ -511,13 +511,14 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
                 logger.debug(f"🔇 [{self._instance_id}] Ignorando click (Master actual es: {id_maestro})")
                 return
 
-        # 1. Protección contra flood activa
+        # 1. Quitar spinner inmediatamente
+        try: await query.answer()
+        except: pass
+        
+        # 2. Protección contra flood (Solo log)
         ahora = time.time()
         if ahora < self._retry_after_edit_until:
-            try:
-                await query.answer(f"⚠️ Flood Activo. Espera {int(self._retry_after_edit_until - ahora)}s.", show_alert=True)
-            except: pass
-            return
+             logger.debug(f"⚠️ [{self._instance_id}] Click recibido durante flood global...")
             
         # 2. Verificar Administrador
         if user_id != self.admin_id:
@@ -712,18 +713,21 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
             if self.reconectar: await self.reconectar()
             texto, keyboard = self._crear_menu_config(await self.obtener_estado())
             await self._safe_edit(query, texto, keyboard, manual=True)
-            
+                
     async def _safe_edit(self, query, text: str, keyboard: Optional[InlineKeyboardMarkup] = None, manual: bool = False) -> bool:
         """Edición segura de mensajes con manejo de flood y cool-down."""
         ahora = time.time()
         
-        # Protección de cool-down solo para automático (manual=False)
-        if not manual and ahora - getattr(self, '_last_edit_time', 0) < 10:
-            return False
+        # 1. Protección de cool-down solo para automático (manual=False)
+        if not manual:
+            if ahora - getattr(self, '_last_edit_time', 0) < 15:
+                # Actualización automática muy frecuente: pausar
+                return False
+            if ahora < self._retry_after_edit_until:
+                # Flood global activo: pausar automáticos
+                return False
 
-        if ahora < self._retry_after_edit_until:
-            return False
-            
+        # 2. Intentar edición (Las acciones manuales SIEMPRE lo intentan)
         try:
             await query.edit_message_text(text, reply_markup=keyboard, parse_mode="HTML")
             self._last_edit_time = ahora
