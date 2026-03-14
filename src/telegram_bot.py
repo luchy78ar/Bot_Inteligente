@@ -14,7 +14,8 @@ from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, 
     ContextTypes, MessageHandler, filters
 )
-from telegram.error import RetryAfter, TelegramError
+from telegram.error import RetryAfter, TelegramError, BadRequest
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,8 @@ class BotTelegram:
         self._refresh_lock = asyncio.Lock()
         self._retry_after_edit_until: float = 0.0
         self._ultimo_menu_type: str = "dashboard"
+        self._instance_id = str(uuid.uuid4())[:8]
+        logger.info(f"🤖 Bot Instance ID: {self._instance_id}")
 
     async def iniciar(self) -> None:
         try:
@@ -135,7 +138,10 @@ class BotTelegram:
         """Actualiza el dashboard usando un estado proporcionado o consultando el actual."""
         if not self._chat_id: return
         if self._refresh_lock.locked(): return 
-        if time.time() < self._retry_after_edit_until: return # Silencio total si estamos bloqueados
+        
+        ahora = time.time()
+        if ahora < self._retry_after_edit_until: 
+            return # Silencio total si estamos bloqueados
             
         async with self._refresh_lock:
             try:
@@ -171,18 +177,24 @@ class BotTelegram:
                             text=texto, reply_markup=kb, parse_mode='HTML'
                         )
                         mensaje_editado = True
+                    except RetryAfter as e_flood:
+                        self._retry_after_edit_until = time.time() + e_flood.retry_after
+                        logger.warning(f"⚠️ Flood detectado en Dash: Bloqueo por {e_flood.retry_after}s")
+                        return
                     except Exception as e_edit:
                         error_str = str(e_edit)
                         if "Message is not modified" in error_str:
-                            await self.app.bot.edit_message_reply_markup(
-                                chat_id=self._chat_id, message_id=self._msg_dashboard_id,
-                                reply_markup=kb
-                            )
-                            mensaje_editado = True
-                        elif "message to edit not found" in error_str or "MESSAGE_ID_INVALID" in error_str or "Bad Request" in error_str:
+                            try:
+                                await self.app.bot.edit_message_reply_markup(
+                                    chat_id=self._chat_id, message_id=self._msg_dashboard_id,
+                                    reply_markup=kb
+                                )
+                                mensaje_editado = True
+                            except: pass
+                        elif "message to edit not found" in error_str or "MESSAGE_ID_INVALID" in error_str:
                             self._msg_dashboard_id = None
                         else:
-                            logger.debug(f"ℹ️ Edit attempt: {error_str}")
+                            logger.debug(f"ℹ️ Edit info: {error_str}")
                 
                 if not mensaje_editado and self._msg_dashboard_id is None:
                     try:
@@ -190,13 +202,12 @@ class BotTelegram:
                             chat_id=self._chat_id, text=texto, reply_markup=kb, parse_mode='HTML'
                         )
                         self._msg_dashboard_id = msg.message_id
+                    except RetryAfter as e_flood2:
+                        self._retry_after_edit_until = time.time() + e_flood2.retry_after
                     except Exception as e_send:
                         logger.debug(f"ℹ️ Send attempt: {e_send}")
-            except RetryAfter as e:
-                logger.warning(f"⚠️ Telegram Flood (Dashboard): Esperando {e.retry_after}s")
-                # No hacemos nada, el loop volverá a intentar en 15s
             except Exception as e:
-                logger.debug(f"ℹ️ Refresh info: {e}")
+                logger.debug(f"ℹ️ Refresh total info: {e}")
 
     async def notificar(self, mensaje: str) -> None:
         """Envía un mensaje directo al administrador."""
@@ -608,6 +619,7 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
                 [InlineKeyboardButton("⬅️ Volver", callback_data="menu_config")]
             ])
             else: return
+            logger.info(f"📱 [{self._instance_id}] Abriendo sub-menu: {m}")
             await self._safe_edit(query, f"⚙️ <b>MODIFICAR {m.upper()}</b>", kb)
         elif data.startswith("num_"):
             raw = data.replace("num_", "")
@@ -648,9 +660,11 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
 
     async def _safe_edit(self, query, texto: str, keyboard: InlineKeyboardMarkup = None) -> bool:
         """Edita un mensaje de forma segura, manejando Flood Control."""
-        if time.time() < self._retry_after_edit_until:
-            espera = int(self._retry_after_edit_until - time.time())
-            try: await query.answer(f"⏳ Telegram bloqueado por {espera}s. Espera...", show_alert=True)
+        ahora = time.time()
+        if ahora < self._retry_after_edit_until:
+            espera = int(self._retry_after_edit_until - ahora)
+            msg_espera = f"⏳ Bloqueo temporal: {espera}s"
+            try: await query.answer(msg_espera, show_alert=False)
             except: pass
             return False
 
@@ -658,14 +672,23 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
             await query.edit_message_text(texto, reply_markup=keyboard, parse_mode='HTML')
             return True
         except RetryAfter as e:
-            self._retry_after_edit_until = time.time() + e.retry_after
-            logger.warning(f"🚨 Seteando bloqueo de Telegram por {e.retry_after}s")
-            try: await query.answer(f"⚠️ Flood Control: Bloqueado por {e.retry_after}s", show_alert=True)
+            # CORRECCIÓN: Algunos entornos reportan segundos excesivos. 
+            # Si el bloqueo es > 5 min, lo tratamos como algo transitorio de 30s.
+            bloqueo = e.retry_after
+            if bloqueo > 300:
+                logger.warning(f"🚨 [{self._instance_id}] Flood reportado {bloqueo}s - Usando 45s de seguridad.")
+                bloqueo = 45
+            
+            self._retry_after_edit_until = time.time() + bloqueo
+            try: await query.answer(f"⚠️ Flood: Espera {int(bloqueo)}s", show_alert=True)
             except: pass
             return False
-        except Exception as e:
+        except BadRequest as e:
             if "Message is not modified" in str(e): return True
-            logger.error(f"❌ Error en safe_edit: {e}")
+            logger.error(f"❌ [{self._instance_id}] Error BadRequest: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"❌ [{self._instance_id}] Error en safe_edit: {e}")
             return False
 
     async def _error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
