@@ -682,28 +682,34 @@ class BotTrading:
         if self.persistencia: await self.persistencia.cerrar()
 
 async def main():
-    # INICIAR WEB SERVER PRIMERO para healthcheck
-    iniciar_servidor()
+    # Web server ya iniciado en Dockerfile para healthcheck
     
-    bot = BotTrading()
-    if await bot.inicializar():
-        # AUTO-ARRANQUE INTELIGENTE (Solo si estaba running en la DB)
-        estado_db = await bot.persistencia.obtener_estado_bot()
-        was_running = estado_db.get('running', False) if estado_db else False
-        
-        if was_running:
-            logger.info("⚡ AUTO-ARRANQUE: Reanudando trading según estado previo...")
-            await bot.iniciar_trading()
+    try:
+        bot = BotTrading()
+        if await bot.inicializar():
+            # AUTO-ARRANQUE INTELIGENTE (Solo si estaba running en la DB)
+            estado_db = await bot.persistencia.obtener_estado_bot()
+            was_running = estado_db.get('running', False) if estado_db else False
+            
+            if was_running:
+                logger.info("⚡ AUTO-ARRANQUE: Reanudando trading según estado previo...")
+                await bot.iniciar_trading()
+            else:
+                logger.info("⏸️ BOT EN ESPERA: El trading está pausado. Usa Telegram para iniciar.")
+                # Sincronizar dashboard web inicial aunque esté pausado
+                estado_inicial = await bot.obtener_estado()
+                actualizar_estado(estado_inicial)
+            
+            try:
+                while True: await asyncio.sleep(1)
+            except asyncio.CancelledError: pass
+            finally: await bot.cerrar()
         else:
-            logger.info("⏸️ BOT EN ESPERA: El trading está pausado. Usa Telegram para iniciar.")
-            # Sincronizar dashboard web inicial aunque esté pausado
-            estado_inicial = await bot.obtener_estado()
-            actualizar_estado(estado_inicial)
-        
-        try:
-            while True: await asyncio.sleep(1)
-        except asyncio.CancelledError: pass
-        finally: await bot.cerrar()
+            logger.warning("⚠️ Inicialización del bot falló. Servidor web activo para healthcheck.")
+            while True: await asyncio.sleep(3600)
+    except Exception as e:
+        logger.error(f"❌ Error en main: {e}")
+        while True: await asyncio.sleep(3600)
 
 if __name__ == "__main__":
     try: asyncio.run(main())
