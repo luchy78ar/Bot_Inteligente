@@ -16,15 +16,30 @@ from telegram.ext import (
 
 logger = logging.getLogger(__name__)
 
-# Parámetros populares para selección rápida
+# Top 50 Market Cap Coins para selección rápida
 PARES_POPULARES = [
     ("BTC/USDT:USDT", "BTC"), ("ETH/USDT:USDT", "ETH"), ("SOL/USDT:USDT", "SOL"),
     ("XRP/USDT:USDT", "XRP"), ("BNB/USDT:USDT", "BNB"), ("ADA/USDT:USDT", "ADA"),
     ("DOGE/USDT:USDT", "DOGE"), ("AVAX/USDT:USDT", "AVAX"), ("DOT/USDT:USDT", "DOT"),
-    ("MATIC/USDT:USDT", "MATIC"), ("LINK/USDT:USDT", "LINK"), ("LTC/USDT:USDT", "LTC")
+    ("MATIC/USDT:USDT", "MATIC"), ("LINK/USDT:USDT", "LINK"), ("LTC/USDT:USDT", "LTC"),
+    ("TRX/USDT:USDT", "TRX"), ("TON/USDT:USDT", "TON"), ("SHIB/USDT:USDT", "SHIB"),
+    ("PEPE/USDT:USDT", "PEPE"), ("UNI/USDT:USDT", "UNI"), ("ATOM/USDT:USDT", "ATOM"),
+    ("XLM/USDT:USDT", "XLM"), ("ETC/USDT:USDT", "ETC"), ("XMR/USDT:USDT", "XMR"),
+    ("BCH/USDT:USDT", "BCH"), ("LDO/USDT:USDT", "LDO"), ("FIL/USDT:USDT", "FIL"),
+    ("HBAR/USDT:USDT", "HBAR"), ("APT/USDT:USDT", "APT"), ("ARBB/USDT:USDT", "ARB"),
+    ("OP/USDT:USDT", "OP"), ("NEAR/USDT:USDT", "NEAR"), ("VET/USDT:USDT", "VET"),
+    ("MKR/USDT:USDT", "MKR"), ("ICP/USDT:USDT", "ICP"), ("QNT/USDT:USDT", "QNT"),
+    ("GRT/USDT:USDT", "GRT"), ("ALGO/USDT:USDT", "ALGO"), ("FTM/USDT:USDT", "FTM"),
+    ("SAND/USDT:USDT", "SAND"), ("MANA/USDT:USDT", "MANA"), ("AAVE/USDT:USDT", "AAVE"),
+    ("AXS/USDT:USDT", "AXS"), ("THETA/USDT:USDT", "THETA"), ("EOS/USDT:USDT", "EOS"),
+    ("XTZ/USDT:USDT", "XTZ"), ("FLOW/USDT:USDT", "FLOW"), ("CHZ/USDT:USDT", "CHZ"),
+    ("CRV/USDT:USDT", "CRV"), ("KAVA/USDT:USDT", "KAVA"), ("RNDR/USDT:USDT", "RNDR")
 ]
 
+PARES_POPULARES_ordenado = sorted(PARES_POPULARES, key=lambda x: x[1])
+
 PARAMETROS_CONFIG = {
+    "symbol": {"nombre": "Par de Trading", "tipo": "str"},
     "leverage": {"nombre": "Leverage", "tipo": "int"},
     "initial_volume_pct": {"nombre": "Vol. Inicial", "tipo": "float"},
     "volume_multiplier": {"nombre": "Multiplicador", "tipo": "float"},
@@ -363,26 +378,31 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
         cfg = estado.get('config', {})
         testnet = estado.get('testnet', True)
         tp_int = "✅ ON" if cfg.get('tp_inteligente') else "❌ OFF"
+        current_symbol = cfg.get('symbol', 'BTC/USDT:USDT')
+        symbol_name = current_symbol.split('/')[0] if current_symbol else 'BTC'
         
         keyboard = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton(f"⚡ Lev: {cfg.get('leverage')}x", callback_data="menu_leverage"),
-                InlineKeyboardButton(f"🎯 TP: {cfg.get('take_profit_pct')*100:.1f}%", callback_data="menu_tp")
+                InlineKeyboardButton(f"🪙 PAR: {symbol_name}/USDT", callback_data="menu_symbol"),
+                InlineKeyboardButton(f"⚡ Lev: {cfg.get('leverage')}x", callback_data="menu_leverage")
             ],
             [
-                InlineKeyboardButton(f"🔄 Ciclos: {'∞' if cfg.get('max_ciclos', 0) == 0 else cfg.get('max_ciclos')}", callback_data="toggle_ciclos"),
+                InlineKeyboardButton(f"🎯 TP: {cfg.get('take_profit_pct')*100:.1f}%", callback_data="menu_tp"),
                 InlineKeyboardButton(f"📉 Niveles DCA: {cfg.get('max_dca_levels')}", callback_data="menu_max_dca")
             ],
             [
-                InlineKeyboardButton(f"📏 Step: {cfg.get('dca_step_pct')*100:.2f}%", callback_data="menu_step"),
-                InlineKeyboardButton(f"✖️ Mult. Step: {cfg.get('step_multiplier')}x", callback_data="menu_mult_step")
+                InlineKeyboardButton(f"🔄 Ciclos: {'∞' if cfg.get('max_ciclos', 0) == 0 else cfg.get('max_ciclos')}", callback_data="toggle_ciclos"),
+                InlineKeyboardButton(f"📏 Step: {cfg.get('dca_step_pct')*100:.2f}%", callback_data="menu_step")
             ],
             [
-                InlineKeyboardButton(f"🪜 Escalón: {cfg.get('trailing_distancia')*100:.2f}%", callback_data="menu_trailing"),
-                InlineKeyboardButton(f"💵 Vol: {cfg.get('initial_volume_pct')*100:.1f}%", callback_data="menu_volumen")
+                InlineKeyboardButton(f"✖️ Mult. Step: {cfg.get('step_multiplier')}x", callback_data="menu_mult_step"),
+                InlineKeyboardButton(f"🪜 Escalón: {cfg.get('trailing_distancia')*100:.2f}%", callback_data="menu_trailing")
             ],
             [
-                InlineKeyboardButton(f"🧠 TP INT: {tp_int}", callback_data="cfg_tp_inteligente"),
+                InlineKeyboardButton(f"💵 Vol: {cfg.get('initial_volume_pct')*100:.1f}%", callback_data="menu_volumen"),
+                InlineKeyboardButton(f"🧠 TP INT: {tp_int}", callback_data="cfg_tp_inteligente")
+            ],
+            [
                 InlineKeyboardButton("🧪 MODO" if testnet else "🟢 REAL", callback_data="toggle_testnet")
             ],
             [InlineKeyboardButton("🔥 RESET MAESTRO (TODO A CERO)", callback_data="reset_maestro")],
@@ -502,7 +522,15 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
         elif data == "status": await self._cmd_start(update, context)
         elif data.startswith("menu_"):
             m = data.replace("menu_", "")
-            if m == "leverage": kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"{x}x", callback_data=f"num_leverage_{x}") for x in [1,3,5,10]], [InlineKeyboardButton(f"{x}x", callback_data=f"num_leverage_{x}") for x in [20,30,50,70]], [InlineKeyboardButton("✏️ Custom", callback_data="custom_leverage")], [InlineKeyboardButton("⬅️ Volver", callback_data="menu_config")]])
+            if m == "symbol":
+                pares = PARES_POPULARES_ordenado
+                kb_buttons = []
+                for i in range(0, len(pares), 5):
+                    row = [InlineKeyboardButton(f"🪙 {p[1]}", callback_data=f"num_symbol_{p[0]}") for p in pares[i:i+5]]
+                    kb_buttons.append(row)
+                kb_buttons.append([InlineKeyboardButton("⬅️ Volver", callback_data="menu_config")])
+                kb = InlineKeyboardMarkup(kb_buttons)
+            elif m == "leverage": kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"{x}x", callback_data=f"num_leverage_{x}") for x in [1,3,5,10]], [InlineKeyboardButton(f"{x}x", callback_data=f"num_leverage_{x}") for x in [20,30,50,70]], [InlineKeyboardButton("✏️ Custom", callback_data="custom_leverage")], [InlineKeyboardButton("⬅️ Volver", callback_data="menu_config")]])
             elif m == "tp": kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"{x}%", callback_data=f"num_take_profit_pct_{x/100}") for x in [1, 1.5, 2, 5]], [InlineKeyboardButton(f"{x}%", callback_data=f"num_take_profit_pct_{x/100}") for x in [10, 20, 50]], [InlineKeyboardButton("✏️ Custom", callback_data="custom_take_profit_pct")], [InlineKeyboardButton("⬅️ Volver", callback_data="menu_config")]])
             elif m == "max_dca": kb = InlineKeyboardMarkup([[InlineKeyboardButton(str(x), callback_data=f"num_max_dca_levels_{x}") for x in [2,4,6,8]], [InlineKeyboardButton(str(x), callback_data=f"num_max_dca_levels_{x}") for x in [10,15,20,30]], [InlineKeyboardButton("✏️ Custom", callback_data="custom_max_dca_levels")], [InlineKeyboardButton("⬅️ Volver", callback_data="menu_config")]])
             elif m == "step": kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"{x}%", callback_data=f"num_dca_step_pct_{x/100}") for x in [0.2, 0.3, 0.5, 1]], [InlineKeyboardButton(f"{x}%", callback_data=f"num_dca_step_pct_{x/100}") for x in [1.5, 2, 3, 5]], [InlineKeyboardButton("✏️ Custom", callback_data="custom_dca_step_pct")], [InlineKeyboardButton("⬅️ Volver", callback_data="menu_config")]])
@@ -513,9 +541,15 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
             else: return
             await query.edit_message_text(f"⚙️ <b>MODIFICAR {m.upper()}</b>", reply_markup=kb, parse_mode='HTML')
         elif data.startswith("num_"):
-            p = data.replace("num_", "").rsplit("_", 1)
-            param = p[0]
-            valor = int(p[1]) if param in ['leverage', 'max_dca_levels'] else float(p[1])
+            raw = data.replace("num_", "")
+            
+            if raw.startswith("symbol_"):
+                param = 'symbol'
+                valor = raw.replace("symbol_", "")
+            else:
+                p = raw.rsplit("_", 1)
+                param = p[0]
+                valor = int(p[1]) if param in ['leverage', 'max_dca_levels'] else float(p[1])
             
             if param == 'leverage' and self.obtener_exchange:
                 try:
