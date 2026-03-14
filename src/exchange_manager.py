@@ -362,7 +362,15 @@ class ExchangeWrapper:
                       limite: int = 100) -> pd.DataFrame:
         """Obtiene datos OHLCV en formato DataFrame."""
         try:
-            ohlcv = self._exchange.fetch_ohlcv(symbol, timeframe, limit=limite)
+            # Normalizar símbolo
+            symbol_norm = self._normalizar_symbol(symbol)
+            symbol_buscar = symbol_norm if symbol_norm in self._exchange.markets else symbol
+            
+            ohlcv = self._exchange.fetch_ohlcv(symbol_buscar, timeframe, limit=limite)
+            
+            if not ohlcv:
+                logger.warning(f"⚠️ Sin datos OHLCV para {symbol_buscar}")
+                return pd.DataFrame()
             
             df = pd.DataFrame(ohlcv, columns=[
                 'timestamp', 'open', 'high', 'low', 'close', 'volume'
@@ -372,7 +380,7 @@ class ExchangeWrapper:
             
             return df
         except Exception as e:
-            logger.error(f"❌ Error obteniendo OHLCV: {e}")
+            logger.error(f"❌ Error obteniendo OHLCV de {symbol}: {e}")
             return pd.DataFrame()
     
     def configurar_apalancamiento(self, symbol: str, leverage: int) -> bool:
