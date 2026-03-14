@@ -389,14 +389,17 @@ class BotTrading:
         except Exception: return False
     
     async def cerrar_todas_posiciones(self) -> bool:
-        """Cierra todo y limpia dashboards inmediatamente."""
+        """Cierre total de Pánico: cierra todas las posiciones del exchange."""
         try:
-            logger.warning("🚨 PÁNICO: Cierre total en el Exchange...")
+            logger.warning("🚨 PÁNICO: Solicitando cierre total en el Exchange...")
             self.estado.running = False
-            for tarea in self.tareas: tarea.cancel()
+            for tarea in self.tareas: 
+                tarea.cancel()
             self.tareas.clear()
+
+            loop = asyncio.get_event_loop()
+            exito_exchange = await loop.run_in_executor(None, self.exchange.cerrar_todas_posiciones)
             
-            exito_exchange = self.exchange.cerrar_todas_posiciones()
             await self.persistencia.limpiar_posiciones()
             await self.persistencia.actualizar_estado_bot(running=False)
             
@@ -404,10 +407,15 @@ class BotTrading:
             estado_limpio = await self.obtener_estado()
             actualizar_estado(estado_limpio)
             if self.telegram: await self.telegram.forzar_refresco()
+
+            if exito_exchange:
+                logger.info("✅ Pánico completado: Todas las posiciones cerradas.")
+            else:
+                logger.error("❌ Pánico falló parcial o totalmente en el exchange.")
             
             return exito_exchange
         except Exception as e:
-            logger.error(f"❌ Error pánico: {e}")
+            logger.error(f"❌ Error en comando de pánico: {e}")
             return False
 
     async def iniciar_trading(self) -> None:
@@ -422,16 +430,27 @@ class BotTrading:
         self.tareas.append(tarea_trading)
     
     async def detener_trading(self) -> None:
-        self.estado.running = False
-        for tarea in self.tareas: tarea.cancel()
-        self.tareas.clear()
-        self.exchange.cerrar_posicion(self.simbolo_actual)
-        await self.persistencia.limpiar_posiciones()
-        await self.persistencia.actualizar_estado_bot(running=False)
-        # Sincronización inmediata
-        estado_fresco = await self.obtener_estado()
-        actualizar_estado(estado_fresco)
-        if self.telegram: await self.telegram.forzar_refresco()
+        """Detiene el bot y cierra la posición abierta inmediatamente."""
+        try:
+            logger.warning("🛑 Deteniendo trading y cerrando posición activa...")
+            self.estado.running = False
+            for tarea in self.tareas: 
+                tarea.cancel()
+            self.tareas.clear()
+            
+            # Cierre radical de la posición actual usando executor
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, self.exchange.cerrar_posicion, self.simbolo_actual)
+            
+            await self.persistencia.limpiar_posiciones()
+            await self.persistencia.actualizar_estado_bot(running=False)
+            
+            # Sincronización inmediata de dashboards
+            estado_fresco = await self.obtener_estado()
+            actualizar_estado(estado_fresco)
+            if self.telegram: await self.telegram.forzar_refresco()
+        except Exception as e:
+            logger.error(f"❌ Error al detener trading: {e}")
 
     async def loop_trading(self) -> None:
         logger.info("🚀 Monitor de Precio Real-Time Iniciado (5s)")

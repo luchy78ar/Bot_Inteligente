@@ -606,59 +606,43 @@ class ExchangeWrapper:
             return None
     
     def cerrar_posicion(self, symbol: str, cantidad: Optional[float] = None) -> bool:
-        """Cierra la posición actual de forma radical e infalible (Hedge Mode Aware)."""
+        """Cierra la posición actual de forma radical e infalible (Bybit & Binance)."""
         try:
-            # 1. Limpieza total de órdenes para este símbolo específico (Binance Direct)
-            if self.exchange_id == 'binance':
-                try:
-                    symbol_binance = symbol.replace('/', '').replace(':USDT', '')
-                    logger.info(f"🧹 Binance: Cancelando TODAS las órdenes de {symbol_binance}...")
-                    self._exchange.fapiPrivateDeleteAllOpenOrders({'symbol': symbol_binance})
-                    import time
-                    time.sleep(1) # Pausa crítica para sincronización de Binance
-                except Exception as e:
-                    logger.debug(f"⚠️ Error en limpieza directa de Binance: {e}")
+            # 1. Normalizar símbolo
+            symbol_buscar = self._normalizar_symbol(symbol)
+            logger.info(f"🔒 Solicitado cierre de posición en {symbol_buscar}...")
 
-            # 2. Obtener la posición exacta con datos crudos
-            positions = self._exchange.fetch_positions([symbol])
-            pos = None
-            for p in positions:
-                contracts = float(p.get('contracts') or p.get('size') or p.get('info', {}).get('positionAmt', 0))
-                if contracts != 0:
-                    pos = p
-                    break
+            # 2. Limpieza de órdenes previas (Evitar bloqueos)
+            try:
+                self._exchange.cancel_all_orders(symbol_buscar)
+                logger.info(f"🧹 Órdenes canceladas para {symbol_buscar}")
+            except Exception as e:
+                logger.debug(f"ℹ️ Info limpieza órdenes: {e}")
+
+            # 3. Obtener la posición exacta
+            pos = self.obtener_posicion(symbol_buscar)
             
-            if not pos:
-                logger.warning(f"⚠️ No hay posición activa en {symbol} para cerrar.")
-                return True # Ya está cerrada
+            if not pos or abs(pos.get('size', 0)) < 0.00001:
+                logger.warning(f"⚠️ No hay posición activa en {symbol_buscar} para cerrar.")
+                return True 
             
-            # 3. Datos de la posición
-            raw_size = float(pos.get('info', {}).get('positionAmt', 0))
-            lado_posicion = pos.get('info', {}).get('positionSide', 'BOTH') # BOTH = One Way, LONG/SHORT = Hedge
-            cantidad_real = abs(raw_size)
+            cantidad_real = abs(pos['size'])
             cantidad_a_cerrar = cantidad_real if cantidad is None else min(cantidad, cantidad_real)
             
-            # Ajustar a precisión (truncar hacia abajo)
-            import math
-            paso_cantidad = self._exchange.markets[symbol]['precision']['amount']
-            factor = 1 / paso_cantidad
-            cantidad_a_cerrar = math.floor(cantidad_a_cerrar * factor) / factor
+            # Ajustar a precisión
+            cantidad_a_cerrar = self.cantidad_a_precision(symbol_buscar, cantidad_a_cerrar)
             
-            # Determinar lado de la orden
-            lado_orden = 'sell' if raw_size > 0 else 'buy'
+            # Determinar lado de la orden (contrario a la posición)
+            lado_orden = 'sell' if pos['size'] > 0 else 'buy'
             
-            # 4. Parámetros de cierre (Compatibilidad Hedge Mode)
             params = {'reduceOnly': True}
-            if lado_posicion != 'BOTH':
-                params['positionSide'] = lado_posicion
-                # En Hedge Mode, ReduceOnly no es compatible con positionSide en algunas versiones de API
-                # pero positionSide + orden contraria es suficiente para cerrar.
-                params.pop('reduceOnly')
+            if self.exchange_id == 'bybit':
+                params['category'] = 'linear'
 
-            logger.info(f"🔒 Cerrando {symbol}: {lado_orden.upper()} {cantidad_a_cerrar} (Modo: {lado_posicion})")
+            logger.info(f"🔒 Cerrando {symbol_buscar}: {lado_orden.upper()} {cantidad_a_cerrar} (Market)")
             
             orden = self._exchange.create_order(
-                symbol=symbol,
+                symbol=symbol_buscar,
                 type='market',
                 side=lado_orden,
                 amount=cantidad_a_cerrar,
@@ -666,7 +650,7 @@ class ExchangeWrapper:
             )
             
             if orden:
-                logger.info(f"✅ Posición de {symbol} CERRADA con éxito.")
+                logger.info(f"✅ Posición de {symbol_buscar} CERRADA con éxito.")
                 return True
             
             return False
