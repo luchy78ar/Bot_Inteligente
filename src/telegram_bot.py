@@ -376,7 +376,6 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
         if data == "toggle_trading":
             try:
                 self._transicion_en_curso = True
-                await query.answer()
                 
                 estado = await self.obtener_estado()
                 is_running = estado.get('running', False)
@@ -384,29 +383,18 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
                 if not is_running:
                     balance = estado.get('balance_total', 0)
                     if balance < 10:
-                        await query.answer("⚠️ Balance insuficiente. Mínimo $10 USDT requeridos.", show_alert=True)
                         self._transicion_en_curso = False
                         return
                 
                 if is_running:
                     await self.detener_bot()
-                    await query.answer("⏹️ Bot DETENIDO", show_alert=False)
                 else:
                     await self.iniciar_bot()
-                    await query.answer("▶️ Bot INICIADO", show_alert=False)
                 
                 await asyncio.sleep(0.5)
                 self._menu_activo = False
-                try:
-                    await self.forzar_refresco()
-                except:
-                    pass
             except Exception as e:
                 logger.error(f"❌ Error toggle: {e}")
-                try:
-                    await query.answer(f"❌ Error: {str(e)[:30]}", show_alert=True)
-                except:
-                    pass
             finally:
                 self._transicion_en_curso = False
             return
