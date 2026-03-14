@@ -428,11 +428,15 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
             await self.forzar_refresco()
         elif data == "menu_config":
             try:
+                logger.info(f"🔧 Abriendo menu config...")
                 self._menu_activo = True
-                texto, keyboard = self._crear_menu_config(await self.obtener_estado())
+                estado = await self.obtener_estado()
+                texto, keyboard = self._crear_menu_config(estado)
                 await query.edit_message_text(texto, reply_markup=keyboard, parse_mode='HTML')
+                logger.info(f"✅ Menu config abierto")
             except Exception as e:
-                if "Message is not modified" not in str(e): logger.error(f"❌ Error config: {e}")
+                logger.error(f"❌ Error config: {e}")
+                await query.answer(f"❌ Error: {str(e)[:50]}", show_alert=True)
         elif data == "toggle_ciclos":
             st = await self.obtener_estado()
             current = st['config'].get('max_ciclos', 0)
