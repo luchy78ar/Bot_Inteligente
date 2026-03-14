@@ -107,18 +107,12 @@ class BotTelegram:
         logger.info(f"🤖 Bot Identity [Process/Telegram]: {self._instance_id}")
 
     async def iniciar(self) -> None:
+        """Inicia el bot de Telegram en modo POLLING para máxima estabilidad."""
         try:
-            from telegram.ext import Application
-            
-            # Usar webhooks con la URL de Koyeb
-            webhook_url = f"https://selected-daron-luchy78ar-d6c587c4.koyeb.app/webhook/{self.token}"
-            
+            # 1. Construir aplicación
             self.app = Application.builder().token(self.token).build()
             
-            # 1. Inicializar PRIMERO la aplicación (Crucial para evitar errores en webhook)
-            await self.app.initialize()
-            await self.app.start()
-            
+            # 2. Registrar Handlers
             self.app.add_handler(CommandHandler("start", self._cmd_start))
             self.app.add_handler(CommandHandler("status", self._cmd_status))
             self.app.add_handler(CommandHandler("panic", self._cmd_panic))
@@ -129,23 +123,24 @@ class BotTelegram:
             # Manejador de errores global
             self.app.add_error_handler(self._error_handler)
             
-            # 2. Configurar webhook con reintentos para evitar el fallo 429 al arrancar
-            intentos_webhook = 3
-            while intentos_webhook > 0:
-                try:
-                    await self.app.bot.set_webhook(webhook_url)
-                    logger.info(f"✅ Webhook configurado en: {webhook_url}")
-                    break
-                except RetryAfter as e:
-                    intentos_webhook -= 1
-                    logger.warning(f"⚠️ Reintentando webhook en {e.retry_after}s...")
-                    await asyncio.sleep(e.retry_after)
-                except Exception as e:
-                    intentos_webhook -= 1
-                    logger.warning(f"⚠️ Error webhook (Intento {3-intentos_webhook}): {e}")
-                    await asyncio.sleep(2)
+            # 3. Inicializar y Arrancar Polling
+            await self.app.initialize()
+            await self.app.start()
             
-            logger.info(f"✅ Bot de Telegram [{self._instance_id}] iniciado.")
+            # Borrar webhook previo por si acaso para que polling funcione
+            try: await self.app.bot.delete_webhook()
+            except: pass
+            
+            await self.app.updater.start_polling()
+            
+            logger.info(f"✅ Bot de Telegram [{self._instance_id}] iniciado en modo POLLING.")
+            
+            # Tarea de actualización de dashboard (opcional, se inicia en main habitualmente)
+            if not self._update_task:
+                self._update_task = asyncio.create_task(self._actualizar_dashboard_loop())
+                
+        except Exception as e:
+            logger.error(f"❌ Error al iniciar Telegram: {e}")
             
             # Inicializar marca de tiempo para evitar spam
             self._last_edit_time = 0
@@ -250,6 +245,12 @@ class BotTelegram:
                 # Frecuencia reducida de refresco automático
                 await asyncio.sleep(60)
                 
+                # SOLO EL MAESTRO actualiza el dashboard automáticamente
+                if self.persistencia:
+                    id_maestro = await self.persistencia.obtener_config("master_bot_id")
+                    if id_maestro and id_maestro != self._instance_id:
+                        continue
+
                 if not self._msg_dashboard_id or self._menu_activo or self._transicion_en_curso:
                     continue
                 
@@ -774,22 +775,49 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
             except: pass
 
     async def _cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Dashboard principal del bot."""
         try:
             user_id = str(update.effective_user.id)
-            if user_id != self.admin_id: return
+            logger.info(f"🚀 [{self._instance_id}] Comando /start recibido de {user_id}")
+            
+            if user_id != self.admin_id: 
+                logger.warning(f"⛔ [{self._instance_id}] Acceso denegado a {user_id} (Admin: {self.admin_id})")
+                return
+                
             self._chat_id = str(update.effective_chat.id)
             self._menu_activo = False
+            
+            # Limpiar mensajes anteriores si es posible
             try: await update.message.delete()
             except: pass
+            
             if self._msg_dashboard_id:
                 try: await self.app.bot.delete_message(self._chat_id, self._msg_dashboard_id)
                 except: pass
+                
             estado = await self.obtener_estado()
             self._ultimo_estado = estado
-            texto, kb = self._crear_panel_operacion(estado) if (estado.get('posiciones', 0) > 0 or estado.get('running', False)) else self._crear_dashboard(estado)
-            msg = await context.bot.send_message(self._chat_id, texto, reply_markup=kb, parse_mode='HTML')
+            
+            # Elegir pantalla (Panel de operación si hay algo abierto, sino Dashboard)
+            if estado.get('posiciones', 0) > 0 or estado.get('lado', 'NEUTRAL') != 'NEUTRAL':
+                texto, kb = self._crear_panel_operacion(estado)
+            else:
+                texto, kb = self._crear_dashboard(estado)
+                
+            msg = await context.bot.send_message(
+                chat_id=self._chat_id, 
+                text=texto, 
+                reply_markup=kb, 
+                parse_mode='HTML'
+            )
             self._msg_dashboard_id = msg.message_id
-        except Exception as e: logger.error(f"❌ Error start: {e}")
+            logger.info(f"✅ [{self._instance_id}] Dashboard enviado (ID: {self._msg_dashboard_id})")
+            
+        except RetryAfter as e:
+            logger.warning(f"⚠️ [{self._instance_id}] Flood en cmd_start: espera {e.retry_after}s")
+            self._retry_after_edit_until = time.time() + e.retry_after
+        except Exception as e: 
+            logger.error(f"❌ Error en _cmd_start [{self._instance_id}]: {e}")
 
     async def _cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None: await self._cmd_start(update, context)
     async def _cmd_panic(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
