@@ -13,6 +13,7 @@ from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, 
     ContextTypes, MessageHandler, filters
 )
+from telegram.error import RetryAfter, TelegramError
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,8 @@ class BotTelegram:
         self._ultimo_estado: Dict[str, Any] = {}
         self._last_refresh_text: str = ""
         self._refresh_lock = asyncio.Lock()
+        self._retry_after_edit_until: float = 0.0
+        self._ultimo_menu_type: str = "dashboard"
 
     async def iniciar(self) -> None:
         try:
@@ -115,6 +118,9 @@ class BotTelegram:
             self.app.add_handler(CallbackQueryHandler(self._callback_query))
             self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_input))
             
+            # Manejador de errores global
+            self.app.add_error_handler(self._error_handler)
+            
             await self.app.initialize()
             await self.app.start()
             
@@ -127,7 +133,8 @@ class BotTelegram:
     async def forzar_refresco(self, estado_externo: Optional[Dict[str, Any]] = None) -> None:
         """Actualiza el dashboard usando un estado proporcionado o consultando el actual."""
         if not self._chat_id: return
-        if self._refresh_lock.locked(): return # Evitar acumulación de peticiones
+        if self._refresh_lock.locked(): return 
+        if time.time() < self._retry_after_edit_until: return # Silencio total si estamos bloqueados
             
         async with self._refresh_lock:
             try:
@@ -142,7 +149,7 @@ class BotTelegram:
                         if not self._ultimo_estado: return
                         estado = self._ultimo_estado
                 
-                if self._menu_activo: return # No refrescar si el usuario está configurando
+                if self._menu_activo: return 
                 
                 if estado.get('posiciones', 0) > 0 or estado.get('running', False):
                     texto, kb = self._crear_panel_operacion(estado)
@@ -184,6 +191,9 @@ class BotTelegram:
                         self._msg_dashboard_id = msg.message_id
                     except Exception as e_send:
                         logger.debug(f"ℹ️ Send attempt: {e_send}")
+            except RetryAfter as e:
+                logger.warning(f"⚠️ Telegram Flood (Dashboard): Esperando {e.retry_after}s")
+                # No hacemos nada, el loop volverá a intentar en 15s
             except Exception as e:
                 logger.debug(f"ℹ️ Refresh info: {e}")
 
@@ -478,7 +488,7 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
                     estado_procesando['_procesando'] = True
                     texto_proc, kb_proc = self._crear_dashboard(estado_procesando)
                     try:
-                        await query.edit_message_text(texto_proc, reply_markup=kb_proc, parse_mode='HTML')
+                        await self._safe_edit(query, texto_proc, kb_proc)
                     except:
                         pass
                     
@@ -531,11 +541,7 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
                 self._menu_activo = True
                 estado = await self.obtener_estado()
                 texto, keyboard = self._crear_menu_config(estado)
-                try:
-                    await query.edit_message_text(texto, reply_markup=keyboard, parse_mode='HTML')
-                except Exception as e2:
-                    logger.error(f"❌ Error edit message: {e2}")
-                    await query.answer("Config: " + texto[:50], show_alert=False)
+                await self._safe_edit(query, texto, keyboard)
                 logger.info(f"✅ Menu config abierto")
             except Exception as e:
                 logger.error(f"❌ Error config: {e}")
@@ -548,7 +554,7 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
                 await query.answer("🔥 Ejecutando Reset Maestro...", show_alert=False)
                 # Feedback visual instantáneo
                 temp_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⏳ RESETEANDO...", callback_data="none")]])
-                await query.edit_message_reply_markup(reply_markup=temp_kb)
+                await self._safe_edit(query, "⏳ <b>PROCESANDO RESET MAESTRO...</b>", temp_kb)
                 
                 if self.reset_maestro:
                     await self.reset_maestro()
@@ -562,14 +568,14 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
             return
         elif data == "cerrar_posicion":
             await self.detener_bot()
-            await query.edit_message_text("✅ <b>POSICIÓN CERRADA.</b>", parse_mode='HTML')
+            await self._safe_edit(query, "✅ <b>POSICIÓN CERRADA.</b>")
             await asyncio.sleep(2)
             await self.forzar_refresco()
         elif data == "panic":
             keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🚨 SÍ, CERRAR TODO", callback_data="panic_confirm")], [InlineKeyboardButton("❌ CANCELAR", callback_data="back_dashboard")]])
-            await query.edit_message_text("⚠️ <b>¿CONFIRMAR CIERRE TOTAL?</b>", reply_markup=keyboard, parse_mode='HTML')
+            await self._safe_edit(query, "⚠️ <b>¿CONFIRMAR CIERRE TOTAL?</b>", keyboard)
         elif data == "panic_confirm":
-            await query.edit_message_text("🚨 <b>EJECUTANDO PÁNICO...</b>", parse_mode='HTML')
+            await self._safe_edit(query, "🚨 <b>EJECUTANDO PÁNICO...</b>")
             if self.cerrar_todo: await self.cerrar_todo()
             await asyncio.sleep(2.5)
             self._menu_activo = False
@@ -601,7 +607,7 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
                 [InlineKeyboardButton("⬅️ Volver", callback_data="menu_config")]
             ])
             else: return
-            await query.edit_message_text(f"⚙️ <b>MODIFICAR {m.upper()}</b>", reply_markup=kb, parse_mode='HTML')
+            await self._safe_edit(query, f"⚙️ <b>MODIFICAR {m.upper()}</b>", kb)
         elif data.startswith("num_"):
             raw = data.replace("num_", "")
             
@@ -626,18 +632,54 @@ Step: {dca_step:.2f}% | Vol: {dca_vol:.1f}%
             
             await self.cambiar_config(param, valor)
             texto, keyboard = self._crear_menu_config(await self.obtener_estado())
-            await query.edit_message_text(texto, reply_markup=keyboard, parse_mode='HTML')
+            await self._safe_edit(query, texto, keyboard)
         elif data == "cfg_tp_inteligente":
             st = await self.obtener_estado()
             await self.cambiar_config('tp_inteligente', not st['config']['tp_inteligente'])
             texto, keyboard = self._crear_menu_config(await self.obtener_estado())
-            await query.edit_message_text(texto, reply_markup=keyboard, parse_mode='HTML')
+            await self._safe_edit(query, texto, keyboard)
         elif data == "toggle_testnet":
             st = await self.obtener_estado()
             await self.cambiar_config('testnet', not st.get('testnet', False))
             if self.reconectar: await self.reconectar()
             texto, keyboard = self._crear_menu_config(await self.obtener_estado())
+            await self._safe_edit(query, texto, keyboard)
+
+    async def _safe_edit(self, query, texto: str, keyboard: InlineKeyboardMarkup = None) -> bool:
+        """Edita un mensaje de forma segura, manejando Flood Control."""
+        if time.time() < self._retry_after_edit_until:
+            espera = int(self._retry_after_edit_until - time.time())
+            try: await query.answer(f"⏳ Telegram bloqueado por {espera}s. Espera...", show_alert=True)
+            except: pass
+            return False
+
+        try:
             await query.edit_message_text(texto, reply_markup=keyboard, parse_mode='HTML')
+            return True
+        except RetryAfter as e:
+            self._retry_after_edit_until = time.time() + e.retry_after
+            logger.warning(f"🚨 Seteando bloqueo de Telegram por {e.retry_after}s")
+            try: await query.answer(f"⚠️ Flood Control: Bloqueado por {e.retry_after}s", show_alert=True)
+            except: pass
+            return False
+        except Exception as e:
+            if "Message is not modified" in str(e): return True
+            logger.error(f"❌ Error en safe_edit: {e}")
+            return False
+
+    async def _error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Manejador global de errores de Telegram."""
+        if isinstance(context.error, RetryAfter):
+            self._retry_after_edit_until = time.time() + context.error.retry_after
+            logger.warning(f"⚠️ Flood Control Global: Bloqueado por {context.error.retry_after}s")
+            return
+        
+        logger.error(f"❌ Error en Telegram: {context.error}")
+        if update and isinstance(update, Update) and update.effective_chat:
+            try:
+                # No enviar mensaje aquí para no empeorar el flood si es el caso
+                pass
+            except: pass
 
     async def _cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
