@@ -687,27 +687,63 @@ async def main():
     
     try:
         bot = BotTrading()
-        if await bot.inicializar():
-            # AUTO-ARRANQUE INTELIGENTE (Solo si estaba running en la DB)
-            estado_db = await bot.persistencia.obtener_estado_bot()
-            was_running = estado_db.get('running', False) if estado_db else False
-            
-            if was_running:
-                logger.info("⚡ AUTO-ARRANQUE: Reanudando trading según estado previo...")
-                await bot.iniciar_trading()
+        
+        # Inicializar persistencia
+        bot.persistencia = Persistencia()
+        await bot.persistencia.inicializar()
+        
+        # Cargar config desde DB
+        config_db = await bot.persistencia.obtener_config()
+        if config_db:
+            bot.config = config_db
+            cfg.actualizar_desde_dict(config_db)
+        
+        # INICIALIZAR TELEGRAM PRIMERO (aunque exchange falle)
+        if cfg.TELEGRAM_BOT_TOKEN and cfg.TELEGRAM_ADMIN_ID:
+            bot.telegram = BotTelegram(
+                cfg.TELEGRAM_BOT_TOKEN,
+                cfg.TELEGRAM_ADMIN_ID,
+                bot.obtener_estado,
+                bot.cambiar_config,
+                bot.iniciar_trading,
+                bot.detener_trading,
+                bot.reconectar_exchange,
+                bot.cerrar_todas_posiciones,
+                bot.guardar_perfil,
+                bot.cargar_perfil,
+                bot.listar_perfiles,
+                bot.eliminar_perfil,
+                bot.resetear_estadisticas,
+                bot.reset_maestro,
+                lambda: bot.exchange
+            )
+            await bot.telegram.iniciar()
+            set_telegram_app(bot.telegram.app, asyncio.get_event_loop())
+            logger.info("✅ Telegram inicializado")
+        
+        # Intentar inicializar exchange (pero no es crítico)
+        try:
+            if await bot.inicializar():
+                # AUTO-ARRANQUE
+                estado_db = await bot.persistencia.obtener_estado_bot()
+                was_running = estado_db.get('running', False) if estado_db else False
+                
+                if was_running:
+                    logger.info("⚡ AUTO-ARRANQUE: Reanudando trading...")
+                    await bot.iniciar_trading()
+                else:
+                    logger.info("⏸️ BOT EN ESPERA: Usa Telegram para iniciar.")
             else:
-                logger.info("⏸️ BOT EN ESPERA: El trading está pausado. Usa Telegram para iniciar.")
-                # Sincronizar dashboard web inicial aunque esté pausado
-                estado_inicial = await bot.obtener_estado()
-                actualizar_estado(estado_inicial)
+                logger.warning("⚠️ Exchange no conectado. Solo Telegram y Web activos.")
+        except Exception as e:
+            logger.warning(f"⚠️ Error conectando exchange: {e}. Solo Telegram y Web activos.")
+        
+        # Mantener alive
+        while True: await asyncio.sleep(3600)
             
-            try:
-                while True: await asyncio.sleep(1)
-            except asyncio.CancelledError: pass
-            finally: await bot.cerrar()
-        else:
-            logger.warning("⚠️ Inicialización del bot falló. Servidor web activo para healthcheck.")
-            while True: await asyncio.sleep(3600)
+    except Exception as e:
+        logger.error(f"❌ Error en main: {e}")
+        while True: await asyncio.sleep(3600)
     except Exception as e:
         logger.error(f"❌ Error en main: {e}")
         while True: await asyncio.sleep(3600)
