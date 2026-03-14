@@ -96,20 +96,30 @@ class BotTrading:
             if estado_db:
                 self.estado.pnl_realizado = estado_db.get('pnl_realizado', 0.0)
                 self.estado.ciclos_completados = estado_db.get('ciclos_completados', 0)
-                self.estado.testnet = cfg.TESTNET
-                await self.persistencia.actualizar_estado_bot(testnet=cfg.TESTNET)
-                self.estado.symbol = estado_db.get('symbol', self.config.symbol)
-                self.simbolo_actual = self.estado.symbol
+                # La testnet y el símbolo ahora se leen prioritariamente de la DB
+                if 'testnet' in estado_db:
+                    self.estado.testnet = bool(estado_db['testnet'])
+                if 'symbol' in estado_db:
+                    self.estado.symbol = estado_db['symbol']
+                    self.simbolo_actual = self.estado.symbol
+                    self.config.symbol = self.simbolo_actual
                 
-                # Actualizar config con el símbolo de la DB
-                self.config.symbol = self.simbolo_actual
-                logger.info(f"📂 Configuración cargada desde DB (testnet={cfg.TESTNET})")
+                # CARGA DINÁMICA DE TODA LA CONFIGURACIÓN RESTANTE
+                # (Leverage, TP, DCA Step, Multipliers, etc.)
+                for param in vars(self.config).keys():
+                    if param == 'symbol': continue
+                    val_db = await self.persistencia.obtener_config(param)
+                    if val_db is not None:
+                        setattr(self.config, param, val_db)
+                        logger.debug(f"⚙️ Config persistente cargada: {param} = {val_db}")
+                
+                logger.info(f"📂 Configuración persistente cargada desde DB (testnet={self.estado.testnet})")
             else:
                 logger.info(f"📂 Configuración cargada desde perfil por defecto")
             
             # 3. Exchange
-            testnet = cfg.TESTNET
-            logger.info(f"🧪 Testnet: {testnet}")
+            testnet = self.estado.testnet  # Usar el valor que ya leímos de la DB o el default
+            logger.info(f"🧪 Testnet activa: {testnet}")
             
             # Limpiar cache de exchange para forzar nueva conexión
             ExchangeFactory.clear_instances()
