@@ -5,6 +5,7 @@ Orquestador principal del bot de trading con sincronización total.
 """
 import asyncio
 import logging
+import os
 import signal
 import sys
 from pathlib import Path
@@ -96,9 +97,13 @@ class BotTrading:
             if estado_db:
                 self.estado.pnl_realizado = estado_db.get('pnl_realizado', 0.0)
                 self.estado.ciclos_completados = estado_db.get('ciclos_completados', 0)
-                # La testnet y el símbolo ahora se leen prioritariamente de la DB
+                # Prioridad: ENV > DB
+                # Primero usar ENV, luego DB solo si no está definido
+                env_testnet = os.getenv("TESTNET", "false").lower() == "true"
                 if 'testnet' in estado_db:
-                    self.estado.testnet = bool(estado_db['testnet'])
+                    self.estado.testnet = env_testnet or bool(estado_db['testnet'])
+                else:
+                    self.estado.testnet = env_testnet
                 if 'symbol' in estado_db:
                     self.estado.symbol = estado_db['symbol']
                     self.simbolo_actual = self.estado.symbol
@@ -194,6 +199,21 @@ class BotTrading:
         """Retorna el estado actual del bot con caché ultrarrápida."""
         try:
             ahora = datetime.now().timestamp()
+            
+            # Si exchange no está inicializado, retornar estado básico
+            if not self.exchange:
+                return {
+                    'running': self.estado.running,
+                    'testnet': cfg.TESTNET,
+                    'symbol': self.simbolo_actual,
+                    'balance_total': 0,
+                    'balance_disponible': 0,
+                    'posiciones': [],
+                    'pnl_realizado': self.estado.pnl_realizado,
+                    'ciclos_completados': self.estado.ciclos_completados,
+                    'error': 'Exchange no conectado'
+                }
+            
             # Sin caché para el balance (siempre fresco)
             balance = self.exchange.obtener_balance()
             
